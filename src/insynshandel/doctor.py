@@ -386,6 +386,73 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         c.skip("currency checks (§11.2.3)", "no fx_rate data — run `insyn refdata fx --backfill`")
 
 
+def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
+    if not conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone():
+        c.skip("static export (§9)", "no aggregates — run `insyn build`")
+        return
+
+    import json
+    import tempfile
+
+    from . import export_static
+
+    with tempfile.TemporaryDirectory() as tmp:
+        s = export_static.export(conn, tmp)
+        files = sorted(p.relative_to(s.out_dir).as_posix() for p in s.out_dir.rglob("*.json"))
+
+        c.check(
+            "every dist file is non-empty valid JSON (§9)",
+            lambda: (
+                all(json.loads((s.out_dir / f).read_text()) for f in files),
+                f"{len(files)} files, {s.bytes / 1_000_000:.2f} MB",
+            ),
+        )
+        required = {
+            "meta.json", "companies.json", "data-quality.json",
+            "leaderboard-30d.json", "leaderboard-90d.json",
+            "leaderboard-365d.json", "leaderboard-all.json",
+        }
+        missing = required - set(files)
+        c.check(
+            "the documented file set is present (§9)",
+            lambda: (not missing, f"missing: {sorted(missing)}" if missing else "all present"),
+        )
+        c.check(
+            "leaderboard is complete — one entry per active company (§8.2)",
+            lambda: _leaderboard_complete(conn, s.out_dir),
+        )
+        c.check(
+            "no leaderboard entry has market_cap 0 or negative pct_of_mcap (§9)",
+            lambda: (not s.warnings, "; ".join(s.warnings) or "clean"),
+        )
+        c.check(
+            "dist total size is a few MB, not tens (§9)",
+            lambda: (s.bytes < 25_000_000, f"{s.bytes / 1_000_000:.2f} MB"),
+        )
+        c.check(
+            "companies.json carries no person data (§8.1)",
+            lambda: (
+                "pdmr" not in (s.out_dir / "companies.json").read_text(),
+                "no pdmr field in the company index",
+            ),
+        )
+
+
+def _leaderboard_complete(conn: sqlite3.Connection, dist) -> tuple[bool, str]:
+    import json
+
+    lb = json.loads((dist / "leaderboard-30d.json").read_text())
+    active = conn.execute(
+        "SELECT COUNT(DISTINCT COALESCE("
+        "(SELECT canonical_lei FROM issuer_alias WHERE alias_lei = lei), lei)) "
+        "FROM transaction_norm WHERE is_counted = 1 "
+        "AND transaction_date BETWEEN ? AND ?",
+        (lb["period_start"], lb["period_end"]),
+    ).fetchone()[0]
+    got = len(lb["entries"])
+    return got == active, f"leaderboard-30d has {got}, DB has {active} active companies"
+
+
 def run(*, network: bool = False) -> int:
     c = _Checks()
     print("doctor: DB checks")
@@ -400,6 +467,8 @@ def run(*, network: bool = False) -> int:
     _normalize_checks(c, conn)
     print("doctor: classify + aggregate checks (§11.2)")
     _aggregate_checks(c, conn)
+    print("doctor: static export checks (§9)")
+    _static_export_checks(c, conn)
 
     if network:
         print("doctor: network checks (§4.6)")

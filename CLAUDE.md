@@ -115,10 +115,25 @@ keeps working while the data goes wrong.
 
 ## Phase status
 
-- **Phases 0–3 + 5 done** (see git log). `insyn build` =
-  normalize→refdata→aggregate. `db.load_seeds()` reloads `data/seed/*.csv` on
-  every migrate and every `insyn aggregate`. 100 hermetic tests.
-- **Next: Phase 6** (`plan/06-static.md`), then Phase 4 (`plan/04-api.md`).
+- **Phases 0–6 done** (see git log). `insyn build` = normalize→refdata→aggregate;
+  `insyn export-static --out dist/` dumps the read API to JSON; `insyn serve`
+  runs the FastAPI wrapper. `api/schemas.py` (Pydantic) + `api/reads.py` are the
+  **shared layer** — both the export and the routes call the same function, and
+  `tests/test_api.py` diffs every route against its `dist/` file so they can't
+  drift. 129 hermetic tests.
+- **Phase 4 notes:** routes are `api/app.py` (`create_app`, CORS from
+  `config.API_CORS_ORIGINS`, never `*`) + `api/routes.py`. Query params are
+  `extra="forbid"` Pydantic models, so `/leaderboard?limit=` and
+  `/transactions?pdmr=` are 422, not silent-ignore (§8.1/§8.2). `/leaderboard`
+  is `?period=` (one of `AGG_PERIODS`) — **not** the plan header's `?from=&to=`;
+  arbitrary windows would need a live-aggregation read with no static twin,
+  breaking parity. `/companies?q=` is a filter only (no `limit`/`offset`).
+  `/transactions` server-sorts on the `reads._TX_ORDER` allow-list with `raw_id`
+  as tiebreaker; its rows carry **no** `pdmr`/`position` (that grant is
+  company-scoped, §8.1). No frontend code lives here — the JSON shape is the
+  wiring (plan §1.1).
+- **Next: deployment** (`plan/deploy.md`) — Docker/compose, reverse proxy,
+  Litestream, cron. Dockerfile CMD is `uvicorn insynshandel.api.app:app`.
 - **Not run yet:**
   - `insyn ingest backfill` (~330 req / 30-45 min) — the user runs it
     **overnight after the final phase**; remind them, don't start it. Resumable.

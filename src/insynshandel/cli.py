@@ -1,8 +1,8 @@
 """`insyn` command-line entry point.
 
 Implemented: ``db migrate``, ``ingest {backfill,recent,gaps}``, ``normalize``,
-``refdata {fx,figi,marketcaps}``, ``aggregate``, ``build``, ``doctor``.
-``export-static`` / ``serve`` arrive in later phases.
+``refdata {fx,figi,marketcaps}``, ``aggregate``, ``build``, ``export-static``,
+``serve``, ``doctor``.
 """
 
 from __future__ import annotations
@@ -13,11 +13,6 @@ from datetime import date
 
 from . import config, db
 from .pipeline import aggregate, ingest, normalize, reference
-
-_NOT_YET = {
-    "export-static": "phase 6",
-    "serve": "phase 4",
-}
 
 
 def _print_summary(s: ingest.IngestSummary) -> None:
@@ -240,6 +235,46 @@ def _cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export_static(args: argparse.Namespace) -> int:
+    from . import export_static
+
+    conn = db.connect(read_only=True)
+    if not conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone():
+        print("no aggregates — run `insyn build` first", file=sys.stderr)
+        return 1
+    s = export_static.export(conn, args.out)
+    mb = s.bytes / 1_000_000
+    print(f"export-static: {s.files} files ({mb:.2f} MB) -> {s.out_dir}/  "
+          f"[{s.companies} companies]")
+    for w in s.warnings:
+        print(f"  !! {w}")
+    return 1 if s.warnings else 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    if not config.DB_PATH.exists():
+        print(f"no database at {config.DB_PATH} — run `insyn build` first", file=sys.stderr)
+        return 1
+    print(f"serve: http://{args.host}:{args.port}  (db {config.DB_PATH}, read-only)")
+    # >1 worker is safe here — every request opens its own read-only connection
+    # and the ingest is the only writer (§10.2.3, deploy.md). `--reload` forces 1.
+    workers = None if args.reload or args.workers <= 1 else args.workers
+    # The import STRING is required: uvicorn re-imports it per worker and on
+    # reload. Passing `create_app()` here would silently disable both. The DB
+    # path therefore has to come from config/env (not `args`) so each fresh
+    # import resolves it identically.
+    uvicorn.run(
+        "insynshandel.api.app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        workers=workers,
+    )
+    return 0
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
@@ -280,12 +315,19 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--no-marketcaps", action="store_true",
                     help="skip yfinance (slow/flaky); everything stays 'unverifiable'")
 
+    es = sub.add_parser("export-static", help="dump the read API to static JSON (§9)")
+    es.add_argument("--out", default="dist", help="output directory (default: dist/)")
+
+    sv = sub.add_parser("serve", help="run the read-only API (§8)")
+    sv.add_argument("--host", default=config.API_HOST)
+    sv.add_argument("--port", type=int, default=config.API_PORT)
+    sv.add_argument("--reload", action="store_true", help="dev auto-reload")
+    sv.add_argument("--workers", type=int, default=1, help="uvicorn worker processes")
+
     doc = sub.add_parser("doctor", help="run acceptance checks (§11)")
     doc.add_argument("--network", action="store_true",
                      help="also run the live single-window fetch checks (§4.6)")
 
-    for name, phase in _NOT_YET.items():
-        sub.add_parser(name, help=f"{phase} — not implemented yet")
     return p
 
 
@@ -303,11 +345,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_aggregate(args)
     if args.command == "build":
         return _cmd_build(args)
+    if args.command == "export-static":
+        return _cmd_export_static(args)
+    if args.command == "serve":
+        return _cmd_serve(args)
     if args.command == "doctor":
         return _cmd_doctor(args)
-    if args.command in _NOT_YET:
-        print(f"insyn {args.command}: not implemented yet — {_NOT_YET[args.command]}")
-        return 0
     return 2
 
 
