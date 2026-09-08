@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+data/insynshandel.db*
+data/cache/
+dist/
+.~lock.*#
+# large source data — fetched at build time, never committed
+lei-isin-*.csv
+gleif_lei_isin_SE_old.csv
+insyn_*.csv
+Insyn*.csv
+!tests/fixtures/insyn_sample.csv
+.env
+# Claude Code per-machine local settings (shared .claude/settings.json stays trackable)
+.claude/settings.local.json
