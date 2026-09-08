@@ -387,6 +387,31 @@ Aggregate on **`transaction_date`**, not `published_date`. Publication date is a
 fetch-windowing concern only; conflating the two makes "net insider trading in
 March" mean two different things in two different places.
 
+> **⚠ LEI coverage is not 100% — invariants 9 & 12 are wrong for history.**
+> Measured against the live export 2026-09-08:
+>
+> | window | rows | no LEI | no LEI *and* no ISIN |
+> | --- | --- | --- | --- |
+> | 2016-07 | 606 | 477 (78.7%) | 130 |
+> | 2017-01 | 581 | 358 (61.6%) | 66 |
+> | 2024-05 | 579 | 0 | 0 |
+>
+> Modern data is clean; pre-2018 is not. `PRIMARY KEY (lei, …)` and a bare
+> `GROUP BY lei` silently collapse every LEI-less row into one bogus `''`
+> bucket, or (if excluded) drop ~two thirds of 2016–2017. **Decide the key
+> before writing `004_agg.sql`.** Options, cheapest first:
+> 1. **Exclude** LEI-less rows with `exclude_reason = 'no_lei'`. Simple, honest,
+>    loses early history. `is_counted = 0`.
+> 2. **Recover** LEI from `issuer_name` via a seed map (`data/seed/issuer_alias.csv`
+>    already exists for LEI↔LEI; extend or add `name→lei`). Most 2016 issuers
+>    (Skanska, Sectra, …) have a modern LEI on later rows — derive the map from
+>    the backfill, review by hand (§7.2's "re-measure after backfill").
+> 3. **Composite key** `COALESCE(NULLIF(lei,''), 'name:'||issuer_name)` so
+>    LEI-less issuers still aggregate, keyed on their (messy, rename-prone) name.
+>
+> `normalize` already carries `lei` verbatim (`''` when absent) and reports the
+> count; `insyn doctor` prints the per-year breakdown.
+
 ```sql
 CREATE TABLE agg_company_period (
   lei             TEXT NOT NULL,

@@ -115,20 +115,34 @@ keeps working while the data goes wrong.
 
 ## Phase status
 
-- **Phase 0 done.** `uv` 0.12.10, packaged project (`uv init --package`), src
-  layout. `insyn` entry point = `insynshandel.cli:main` (stub — prints planned
-  commands). Deps resolve clean on 3.14 (yfinance 1.7.0, pandas 3.0.5).
-- Legacy CSVs moved to `data/cache/legacy/` (gitignored, **local-only — absent
-  from a fresh clone**): the old `Insyn*.csv` export, `isin.csv`,
-  `company_map.csv`, `failed_isins.csv`, GLEIF dumps. Kept for the §11.3 phase-3
-  parity check. `rm -rf data/cache/legacy/lei-isin-20251108.csv` reclaims 249 MB.
-- Legacy scripts (`script.py`, `lei_isin.py`, `marketCap.py`,
-  `test_find_unknown.py`) kept in root + ruff-excluded until phase-3 parity.
-- `data/seed/ticker_override.csv` seeded (61 LEIs) with **blank symbols** — see
-  `data/seed/README.md`: blank = unresolved worklist, the Phase 5 loader must
-  NOT load it as `symbol = ''`.
-- Next: Phase 1 (`plan/01-ingest.md`).
-- Bash tool runs zsh; `uv` lives at `~/.local/bin/uv` (not on PATH by default).
+- **Phases 0–2 done.** Toolchain; ingest (`001_raw.sql`, `sources/fi.py`,
+  `pipeline/ingest.py`); normalize (`002_norm.sql`, `pipeline/normalize.py` —
+  full rebuild of `transaction_norm`, derived cols left NULL for aggregate).
+  `doctor.py`. 51 hermetic tests + `tests/fixtures/insyn_sample.csv`.
+- **Next: Phase 3** (`plan/03-aggregate.md`) + Phase 5 refdata alongside.
+- **Not run yet: `insyn ingest backfill`** (~330 req / 30-45 min). The user will
+  run it themselves **overnight after the final phase** — remind them then; do
+  not start it mid-session. Resumable via `insyn ingest gaps` + re-run.
+- Gotchas carried forward:
+  - **Invariants 9 & 12 overstate LEI coverage** — `2016-07` has NO LEI on 79%
+    of rows, `2017-01` 62%, modern data 0%. **Decision (user):** phase 3
+    `aggregate` sets `exclude_reason = 'no_lei'` / `is_counted = 0` for blank
+    `lei`; a reviewed `issuer_name → lei` seed map + re-aggregate is a follow-up
+    **after the backfill** (⚠ box in `plan/03-aggregate.md` §6.5). §5.3's
+    "no NULL `lei`" is wrong; the 4 real always-present fields are
+    published_date / transaction_date / nature / status.
+  - Invariant 10 (`.strip()`) is **phase 2+ only** — phase 1 stores fields
+    verbatim (stripping changes `row_hash`); `normalize` strips all 22.
+  - `raw_live` is `SELECT *` — a migration that alters `raw_transaction` must
+    `DROP VIEW raw_live` and recreate it.
+  - §4.6's `2026-03-01..07` window drifted 339→338 in a day; recent windows
+    only fall as FI withdraws reports. `doctor` splits FROZEN (exact) / RECENT.
+  - `data/cache/legacy/` is gitignored & **absent from a fresh clone** (old
+    CSVs + GLEIF dumps, kept for the §11.3 parity check).
+  - `data/seed/ticker_override.csv`: 61 LEIs, **blank symbol = worklist**, not
+    `''` — Phase 5 loader must skip blanks (`data/seed/README.md`).
+  - Legacy root scripts ruff-excluded; delete after phase-3 parity.
+  - Bash tool runs zsh; `uv` at `~/.local/bin/uv` (not on PATH).
 
 ## Commands
 
