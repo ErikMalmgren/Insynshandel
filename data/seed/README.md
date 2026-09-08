@@ -15,24 +15,22 @@ loaded into a table during `insyn build` / `insyn db migrate`.
 Columns: `lei,provider,symbol,note`.
 
 - `provider` — `yahoo`, `borsdata`, … or **blank** = applies to every provider.
-- `symbol` — the manual symbol. **`''` (blank) means "not yet resolved — worklist
-  item", NOT the schema's "checked, this company has no symbol".**
+- `symbol` — one of:
+  - a **real ticker** (`ABC-B.ST`) → loaded as a `yahoo`/all-provider override;
+  - **`?`** → unresolved worklist item; **the loader skips it** (stays here as a
+    to-do, contributes nothing to the DB);
+  - **`''` (empty)** with a `note` → "checked, this company genuinely has no
+    listed symbol" (§7.4.2) — loaded, stops anyone re-investigating.
 - `note` — free text.
 
-### Seeding note (Phase 0)
+### Seeding note
 
 Seeded from `data/cache/legacy/failed_isins.csv` — 61 LEIs whose ISIN OpenFIGI's
-XSTO lookup could not resolve as of the legacy run. **"OpenFIGI failed" is not the
-same claim as "this company has no listed symbol."** Most of these are real
-listed companies; the lookup just missed.
-
-**Phase 5 loader MUST treat a blank `symbol` here as an unresolved worklist entry
-— do not load it as `symbol = ''` into `ticker_override`, or resolution step 2
-(§7.3) will permanently short-circuit these companies to "no market cap" with no
-signal they were never actually investigated.** Only a non-blank `symbol` (a real
-ticker, or a deliberate sentinel decided in Phase 5) should produce a
-`ticker_override` row.
+XSTO lookup could not resolve as of the legacy run, all marked `symbol = ?`.
+**"OpenFIGI failed" is not "this company has no symbol"** — most are real listed
+companies the lookup just missed. `db.load_seeds()` skips every `?` row.
 
 Re-measure against the real backfill before hand-filling: after `insyn ingest
 backfill` + `insyn refdata figi`, the set of genuinely unresolvable LEIs may be
-much smaller than 61.
+much smaller than 61. Fill a real ticker in, or set `symbol` empty with a note
+if the company truly has none.

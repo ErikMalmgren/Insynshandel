@@ -61,3 +61,15 @@ BISECT_FLOOR_DAYS = 1            # a single day still capped => data loss, flagg
 # ── Incremental cadence (§4.3, §10.3) ───────────────────────────────────────
 RECENT_DAYS_DEFAULT = 7
 RESCAN_DAYS = 90
+
+# ── Reference data (§7.4) ───────────────────────────────────────────────────
+# Tried in order, first hit wins. Swapping providers is editing this list.
+MARKETCAP_PROVIDERS = [
+    p.strip() for p in os.environ.get("INSYN_MARKETCAP_PROVIDERS", "yahoo,manual").split(",")
+    if p.strip()
+]
+FX_CURRENCIES = ("USD", "EUR", "GBP", "CAD")   # SWEA series exist for these
+MARKETCAP_DEGRADED_FLOOR = 0.5                 # success ratio below which a provider is 'degraded'
+
+# ── Aggregate windows (§6.5) — anchored to config.today(), not MAX(tx_date) ──
+AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")

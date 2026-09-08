@@ -1,8 +1,8 @@
 """`insyn` command-line entry point.
 
-Implemented: ``db migrate``, ``ingest {backfill,recent,gaps}``, ``doctor``.
-Later phases fill in ``build`` / ``export-static`` / ``serve`` (they print a
-notice for now rather than crashing).
+Implemented: ``db migrate``, ``ingest {backfill,recent,gaps}``, ``normalize``,
+``refdata {fx,figi,marketcaps}``, ``aggregate``, ``build``, ``doctor``.
+``export-static`` / ``serve`` arrive in later phases.
 """
 
 from __future__ import annotations
@@ -12,12 +12,9 @@ import sys
 from datetime import date
 
 from . import config, db
-from .pipeline import ingest, normalize
+from .pipeline import aggregate, ingest, normalize, reference
 
 _NOT_YET = {
-    "build": "phase 3 (normalize -> refdata -> aggregate); run `insyn normalize` for now",
-    "aggregate": "phase 3",
-    "refdata": "phase 5",
     "export-static": "phase 6",
     "serve": "phase 4",
 }
@@ -150,6 +147,99 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
     return 0 if s.ok else 1
 
 
+def _print_classify(s: aggregate.ClassifySummary) -> None:
+    if s.unmapped_natures:
+        print("  !! UNMAPPED Karaktär values — add rows to data/seed/nature_map.csv:")
+        for nature, n in s.unmapped_natures.items():
+            print(f"       {nature!r}: {n} rows")
+        return
+    print(f"  classified {s.rows} rows: {s.counted} counted")
+    print(f"  by exclude_reason: {s.by_reason}")
+    print(f"  verification: {s.by_verification} "
+          f"(market caps for {s.market_caps_available} companies)")
+    if s.no_fx_rows:
+        print(f"  !! {s.no_fx_rows} rows have no FX rate — run `insyn refdata fx --backfill`")
+    if not s.market_caps_available:
+        print("  !! no market caps loaded — every counted row is 'unverifiable' (§6.4). "
+              "Run `insyn refdata figi marketcaps` (needs the backfill first).")
+
+
+def _cmd_aggregate(args: argparse.Namespace) -> int:
+    conn = db.connect()
+    if not conn.execute("SELECT 1 FROM transaction_norm LIMIT 1").fetchone():
+        print("transaction_norm is empty — run `insyn normalize` first", file=sys.stderr)
+        return 1
+    s = aggregate.run(conn)
+    print("aggregate:")
+    _print_classify(s.classify)
+    if not s.classify.ok:
+        return 1
+    print(f"  agg_company_period rows by window: {s.periods}")
+    return 0
+
+
+def _cmd_refdata(args: argparse.Namespace) -> int:
+    conn = db.connect()
+    rc = 0
+    for step in args.steps:
+        if step == "fx":
+            fs = reference.fx(conn, backfill=args.backfill)
+            print(f"refdata fx: {fs.currencies}" + (f" errors={fs.errors}" if fs.errors else ""))
+            rc |= 0 if fs.ok else 1
+        elif step == "figi":
+            gs = reference.figi(conn, limit=args.limit)
+            print(f"refdata figi: asked={gs.asked} resolved={gs.resolved} "
+                  f"negative={gs.negative} transport_errors={gs.transport_errors}")
+        elif step == "marketcaps":
+            reference.build_companies(conn)
+            try:
+                ms = reference.marketcaps(conn, standalone=True)
+            except SystemExit:
+                print("refdata marketcaps: provider degraded (exit 1)", file=sys.stderr)
+                return 1
+            print(f"refdata marketcaps: attempted={ms.attempted} written={ms.written} "
+                  f"by_provider={ms.by_provider} failures={ms.failures}")
+    return rc
+
+
+def _cmd_build(args: argparse.Namespace) -> int:
+    conn = db.connect()
+    if not conn.execute("SELECT 1 FROM raw_live LIMIT 1").fetchone():
+        print("raw_live is empty — run `insyn ingest backfill` first", file=sys.stderr)
+        return 1
+
+    print("build: normalize")
+    ns = normalize.normalize(conn)
+    print(f"  {ns.rows_out} rows"
+          + (f", {ns.rows_without_lei} without LEI" if ns.rows_without_lei else ""))
+
+    print("build: refdata")
+    fs = reference.fx(conn, backfill=args.fx_backfill)
+    print(f"  fx {fs.currencies}")
+    if args.no_figi:
+        print("  figi skipped (--no-figi)")
+    else:
+        gs = reference.figi(conn, limit=args.figi_limit)
+        print(f"  figi resolved={gs.resolved} negative={gs.negative}")
+    cs = reference.build_companies(conn)
+    print(f"  companies {cs.companies} ({cs.with_ticker} with ticker)")
+    if args.no_marketcaps or cs.with_ticker == 0:
+        why = "--no-marketcaps" if args.no_marketcaps else "no company has a ticker yet"
+        print(f"  marketcaps skipped ({why}) — every company will be 'unverifiable'")
+    else:
+        ms = reference.marketcaps(conn, standalone=False)   # degraded => warn, continue
+        print(f"  marketcaps written={ms.written}"
+              + (f" DEGRADED {ms.degraded}" if ms.degraded else ""))
+
+    print("build: aggregate")
+    ag = aggregate.run(conn)
+    _print_classify(ag.classify)
+    if not ag.classify.ok:
+        return 1
+    print(f"  windows {ag.periods}")
+    return 0
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
@@ -176,6 +266,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("normalize", help="rebuild transaction_norm from raw_live (§5)")
 
+    rd = sub.add_parser("refdata", help="reference data: fx / figi / marketcaps (§7)")
+    rd.add_argument("steps", nargs="+", choices=["fx", "figi", "marketcaps"])
+    rd.add_argument("--backfill", action="store_true", help="fx: fetch from 2016-07-01")
+    rd.add_argument("--limit", type=int, default=None, help="figi: cap ISINs this run")
+
+    sub.add_parser("aggregate", help="classify transaction_norm + build aggregates (§6)")
+
+    bd = sub.add_parser("build", help="normalize -> refdata -> aggregate (§5.0)")
+    bd.add_argument("--fx-backfill", action="store_true")
+    bd.add_argument("--figi-limit", type=int, default=None)
+    bd.add_argument("--no-figi", action="store_true", help="skip the OpenFIGI step")
+    bd.add_argument("--no-marketcaps", action="store_true",
+                    help="skip yfinance (slow/flaky); everything stays 'unverifiable'")
+
     doc = sub.add_parser("doctor", help="run acceptance checks (§11)")
     doc.add_argument("--network", action="store_true",
                      help="also run the live single-window fetch checks (§4.6)")
@@ -193,6 +297,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_ingest(args)
     if args.command == "normalize":
         return _cmd_normalize(args)
+    if args.command == "refdata":
+        return _cmd_refdata(args)
+    if args.command == "aggregate":
+        return _cmd_aggregate(args)
+    if args.command == "build":
+        return _cmd_build(args)
     if args.command == "doctor":
         return _cmd_doctor(args)
     if args.command in _NOT_YET:

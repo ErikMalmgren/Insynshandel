@@ -248,16 +248,21 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             f"{n} rows with a NULL required field",
         ),
     )
-    c.check(
-        "derived columns still NULL before aggregate (§5.0)",
-        lambda: (
-            (n := conn.execute(
-                "SELECT COUNT(*) FROM transaction_norm WHERE sign IS NOT NULL "
-                "OR is_counted IS NOT NULL OR gross_value_sek IS NOT NULL"
-            ).fetchone()[0]) == 0,
-            f"{n} rows already have derived values (run `insyn aggregate`?)",
-        ),
+    aggregated = bool(
+        conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone()
     )
+    if not aggregated:
+        c.check(
+            "derived columns still NULL before aggregate (§5.0)",
+            lambda: (
+                (n := conn.execute(
+                    "SELECT COUNT(*) FROM transaction_norm WHERE sign IS NOT NULL "
+                    "OR is_counted IS NOT NULL OR gross_value_sek IS NOT NULL"
+                ).fetchone()[0]) == 0,
+                f"{n} rows have derived values but no aggregates — run `insyn aggregate`",
+            ),
+        )
+
     # LEI coverage is a measured fact about the register, not pass/fail.
     rows = conn.execute(
         "SELECT substr(transaction_date,1,4) y, COUNT(*) n, "
@@ -273,6 +278,114 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             print(f"          {r['y']}: {r['no_lei']}/{r['n']} without LEI")
 
 
+def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
+    if not conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone():
+        c.skip("classification + aggregates (§11.2)", "empty — run `insyn build`")
+        return
+
+    c.check(
+        "no unmapped Karaktär values (§11.2)",
+        lambda: (
+            len(u := {
+                r["nature"] for r in conn.execute(
+                    "SELECT DISTINCT nature FROM transaction_norm "
+                    "WHERE nature NOT IN (SELECT karaktar FROM nature_map)"
+                )
+            }) == 0,
+            f"unmapped: {sorted(u)}" if u else "all Karaktär values mapped",
+        ),
+    )
+    c.check(
+        "every uncounted row has a known exclude_reason (§11.2)",
+        lambda: (
+            (bad := conn.execute(
+                "SELECT COUNT(*) FROM transaction_norm WHERE is_counted = 0 "
+                "AND (exclude_reason IS NULL OR exclude_reason NOT IN "
+                "('no_lei','not_current','nature_not_counted','volume_unit',"
+                "'unparseable_number','no_fx_rate','outlier'))"
+            ).fetchone()[0]) == 0,
+            f"{bad} uncounted rows with a missing/unknown reason",
+        ),
+    )
+    c.check(
+        "every counted row has sign +1/-1 and a gross_value_sek (§6.2)",
+        lambda: (
+            (bad := conn.execute(
+                "SELECT COUNT(*) FROM transaction_norm WHERE is_counted = 1 AND "
+                "(sign NOT IN (-1, 1) OR gross_value_sek IS NULL)"
+            ).fetchone()[0]) == 0,
+            f"{bad} counted rows missing sign or value",
+        ),
+    )
+
+    # § 11.2.1 — outliers. Only meaningful once market caps exist.
+    have_mcap = bool(conn.execute(
+        "SELECT 1 FROM market_cap_current WHERE market_cap_sek IS NOT NULL LIMIT 1"
+    ).fetchone())
+    if have_mcap:
+        c.check(
+            "outlier count is small (§11.2.1)",
+            lambda: (
+                (n := conn.execute(
+                    "SELECT COUNT(*) FROM transaction_norm WHERE verification = 'outlier'"
+                ).fetchone()[0]) < 50,
+                f"{n} outliers (a large number means the market-cap join is broken)",
+            ),
+        )
+        c.check(
+            "unverifiable rows are still counted (§11.2.1)",
+            lambda: (
+                conn.execute(
+                    "SELECT COUNT(*) FROM transaction_norm WHERE verification = "
+                    "'unverifiable' AND is_counted = 0 AND exclude_reason NOT IN "
+                    "('no_lei','not_current','nature_not_counted','volume_unit',"
+                    "'unparseable_number','no_fx_rate')"
+                ).fetchone()[0] == 0,
+                "no unverifiable row was dropped for being unverifiable",
+            ),
+        )
+    else:
+        c.skip("outlier checks (§11.2.1)", "no market caps — every row is unverifiable")
+
+    # § 11.2.3 — currency
+    have_fx = bool(conn.execute("SELECT 1 FROM fx_rate LIMIT 1").fetchone())
+    if have_fx:
+        c.check(
+            "no rows excluded for a missing FX rate (§11.2.3)",
+            lambda: (
+                (n := conn.execute(
+                    "SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = 'no_fx_rate'"
+                ).fetchone()[0]) == 0,
+                f"{n} rows have no FX rate — widen `insyn refdata fx --backfill`",
+            ),
+        )
+        c.check(
+            "every currency is covered by fx_rate + SEK (§11.2.3)",
+            lambda: (
+                len(miss := {
+                    r["currency"] for r in conn.execute(
+                        "SELECT DISTINCT currency FROM transaction_norm WHERE currency <> 'SEK'"
+                    )
+                } - {r["currency"] for r in conn.execute("SELECT DISTINCT currency FROM fx_rate")}
+                ) == 0,
+                f"currencies with no series: {sorted(miss)}",
+            ),
+        )
+        c.check(
+            "non-SEK rows valued at a transaction-date rate, not today's (§11.2.3)",
+            lambda: (
+                (n := conn.execute(
+                    "SELECT COUNT(*) FROM transaction_norm WHERE currency <> 'SEK' "
+                    "AND fx_rate_date IS NOT NULL "
+                    "AND julianday(transaction_date) - julianday(fx_rate_date) NOT BETWEEN 0 AND 7"
+                ).fetchone()[0]) == 0,
+                f"{n} non-SEK rows use a rate >7 days from the transaction date",
+            ),
+        )
+    else:
+        c.skip("currency checks (§11.2.3)", "no fx_rate data — run `insyn refdata fx --backfill`")
+
+
 def run(*, network: bool = False) -> int:
     c = _Checks()
     print("doctor: DB checks")
@@ -285,6 +398,8 @@ def run(*, network: bool = False) -> int:
     _db_checks(c, conn)
     print("doctor: normalize checks (§5.3)")
     _normalize_checks(c, conn)
+    print("doctor: classify + aggregate checks (§11.2)")
+    _aggregate_checks(c, conn)
 
     if network:
         print("doctor: network checks (§4.6)")
