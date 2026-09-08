@@ -1,0 +1,28 @@
+# Hermetic checks — no network, runs on every push and PR.
+# (Beyond the plan's repo layout, which lists only ingest.yml. 15 lines that
+#  catch a broken uv.lock or a lint/test regression before it reaches main.)
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.10"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      # doctor's DB-only tier must stay green on an empty, freshly migrated DB
+      - run: uv run insyn db migrate && uv run insyn doctor

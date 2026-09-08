@@ -1,0 +1,30 @@
+# The build context is small on purpose. Everything the image needs is
+# pyproject.toml, uv.lock, .python-version, README.md, src/ and data/seed/.
+.git/
+.github/
+.venv/
+.ruff_cache/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+
+# Runtime data — belongs on the host volume, never in the image (§10.4).
+data/
+!data/seed/
+dist/
+
+# Not needed at runtime.
+tests/
+plan/
+deploy/
+IMPLEMENTATION_PLAN.md
+CLAUDE.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Legacy root scripts (§11.3 — deleted after the parity check).
+script.py
+lei_isin.py
+marketCap.py
+test_find_unknown.py

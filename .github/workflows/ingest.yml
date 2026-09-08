@@ -1,0 +1,122 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# §10.1 — the static-only deployment path (free: no server, no VPS).
+#
+#   ⚠ TEMPLATE — NOT YET RUNNABLE. This workflow assumes infrastructure that
+#   does not exist until you have run the first backfill by hand:
+#
+#     • a rolling GitHub Release tagged `db-latest` holding `insynshandel.db`
+#       as an asset (created by the first `gh release create` / upload below —
+#       the restore step is guarded to migrate-from-empty when it is absent);
+#     • a target for the exported JSON — either this repo's Pages, or a
+#       separate frontend repo that reads the files under `./data/` (§9,
+#       `API_BASE = './data'`). Wire ONE of the two "publish" blocks at the end.
+#     • repo secrets: `PAGES_DEPLOY_TOKEN` (only if publishing to a separate
+#       repo) and optionally `OPENFIGI_API_KEY`.
+#
+#   Until then it is documentation of the intended cadence, not CI that runs.
+# ─────────────────────────────────────────────────────────────────────────────
+name: ingest
+
+on:
+  workflow_dispatch: {}          # manual run — also how you seed `db-latest`
+  schedule:
+    # GitHub cron is UTC; CET is UTC+1 (UTC+2 under DST), so these drift ±1h
+    # across the year — that is fine, the windows have an hour of slack.
+    - cron: "0 5-19 * * 1-5"     # ~06:00–20:00 CET, Mon–Fri — hourly poll
+    - cron: "0 2 * * *"          # ~03:00 CET, nightly — gaps + 90-day re-scan
+
+# Never let two runs write the database at once (§10.1).
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: write                # gh release upload/download on this repo
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
+      # nightly cron => deep re-scan; everything else => cheap incremental
+      RECENT_DAYS: ${{ github.event.schedule == '0 2 * * *' && '90' || '7' }}
+      IS_NIGHTLY: ${{ github.event.schedule == '0 2 * * *' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.10"
+          enable-cache: true
+      - run: uv sync --frozen --no-dev
+
+      # 1. Restore the DB from the rolling release. First run: no asset yet →
+      #    start from a fresh migration. (`gh release download` exits non-zero
+      #    when the tag or asset is missing.)
+      - name: Restore insynshandel.db
+        run: |
+          mkdir -p data
+          if gh release download db-latest --pattern 'insynshandel.db' --dir data --clobber; then
+            echo "restored $(du -h data/insynshandel.db | cut -f1) from db-latest"
+          else
+            echo "no db-latest asset — migrating a fresh database"
+            uv run insyn db migrate
+          fi
+
+      # 2. Heal any missed window — nightly only (§4.7).
+      - name: Heal gaps (nightly)
+        if: env.IS_NIGHTLY == 'true'
+        run: uv run insyn ingest gaps
+
+      # 3. Incremental fetch. --days 7 hourly so a short outage self-heals;
+      #    --days 90 on the nightly run. Writes nothing when nothing changed (§4.5).
+      - name: Ingest recent
+        run: uv run insyn ingest recent --days "$RECENT_DAYS"
+
+      # 4. Rebuild — normalize → refdata → aggregate, in that order (§5.0).
+      #    FIGI/market-caps run here; --no-marketcaps if yfinance is too flaky
+      #    in CI (the site then serves `verification: "unverifiable"`).
+      - name: Build
+        run: uv run insyn build
+
+      # 5. Export the static JSON.
+      - name: Export static
+        run: uv run insyn export-static --out dist/
+
+      # Deliberately fatal here (unlike deploy/ingest.sh, which is advisory):
+      # a failed check in CI should stop the publish, not ship bad JSON. Soft
+      # issues like a degraded market-cap provider SKIP rather than fail.
+      - name: Acceptance checks
+        run: uv run insyn doctor
+
+      # 6a. Re-upload the DB as the rolling release asset. It is ~100–150 MB
+      #     after backfill — over GitHub's 100 MB git limit, fine as an asset.
+      - name: Persist insynshandel.db
+        run: |
+          gh release view db-latest >/dev/null 2>&1 \
+            || gh release create db-latest --title "Latest database snapshot" --notes "Rolling. Updated by the ingest workflow."
+          gh release upload db-latest data/insynshandel.db --clobber
+
+      # 6b. Publish dist/ — WIRE ONE OF THESE.
+      #
+      # (i) This repo's Pages (Settings → Pages → Source: GitHub Actions).
+      #     Add `pages: write` and `id-token: write` to `permissions` above.
+      #
+      # - uses: actions/upload-pages-artifact@v3
+      #   with: { path: dist/ }
+      # - uses: actions/deploy-pages@v4
+      #
+      # (ii) A separate frontend repo that serves the JSON under ./data/:
+      #
+      # - name: Publish to the frontend repo
+      #   run: |
+      #     git clone --depth 1 "https://x:${{ secrets.PAGES_DEPLOY_TOKEN }}@github.com/ErikMalmgren/<frontend-repo>.git" site
+      #     rm -rf site/data && mkdir -p site/data
+      #     cp -r dist/* site/data/
+      #     cd site
+      #     git config user.name  "insyn-bot"
+      #     git config user.email "bot@users.noreply.github.com"
+      #     git add data
+      #     git commit -m "data: $(date -u +%FT%TZ)" || { echo "no change"; exit 0; }
+      #     git push
