@@ -50,11 +50,11 @@ class _Progress:
             return
         self._last = now
         elapsed = now - self.start
-        eta = (total - done) * (elapsed / done) if done else 0.0
         pct = 100 * done / total if total else 100.0
+        eta = (self._hms((total - done) * (elapsed / done)) if done else "?")
         line = (f"  {self.label} {done}/{total} ({pct:.0f}%)"
                 + (f" {detail}" if detail else "")
-                + f" elapsed {self._hms(elapsed)} eta {self._hms(eta)}")
+                + f" elapsed {self._hms(elapsed)} eta {eta}")
         if self.tty:
             self.stream.write("\r\x1b[2K" + line)
             self._dirty = True
@@ -80,6 +80,11 @@ def _figi_progress(quiet: bool):
         done, total,
         f"resolved={fs.resolved} negative={fs.negative} err={fs.transport_errors}",
     )
+
+
+def _fx_progress(quiet: bool):
+    """``reference.fx``'s (done, total, detail) is already _Progress's signature."""
+    return None if quiet else _Progress("fx")
 
 
 def _marketcap_progress(quiet: bool):
@@ -241,6 +246,12 @@ def _print_classify(s: aggregate.ClassifySummary) -> None:
           f"(market caps for {s.market_caps_available} companies)")
     if s.no_fx_rows:
         print(f"  !! {s.no_fx_rows} rows have no FX rate — run `insyn refdata fx --backfill`")
+    if s.implausible_price_rows:
+        print(f"  -- {s.implausible_price_rows} rows excluded as implausible_unit_price "
+              f"(§6.2.1: a total written into the Pris column)")
+    if s.no_fx_series_rows:
+        print(f"  -- {s.no_fx_series_rows} rows in a currency with no Riksbank series "
+              f"({', '.join(config.FX_NO_SERIES)}) — excluded as no_fx_series")
     if not s.market_caps_available:
         print("  !! no market caps loaded — every counted row is 'unverifiable' (§6.4). "
               "Run `insyn refdata figi marketcaps` (needs the backfill first).")
@@ -265,7 +276,8 @@ def _cmd_refdata(args: argparse.Namespace) -> int:
     rc = 0
     for step in args.steps:
         if step == "fx":
-            fs = reference.fx(conn, backfill=args.backfill)
+            fs = reference.fx(conn, backfill=args.backfill,
+                              progress=_fx_progress(args.quiet))
             print(f"refdata fx: {fs.currencies}" + (f" errors={fs.errors}" if fs.errors else ""))
             rc |= 0 if fs.ok else 1
         elif step == "figi":
@@ -298,7 +310,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
           + (f", {ns.rows_without_lei} without LEI" if ns.rows_without_lei else ""))
 
     print("build: refdata")
-    fs = reference.fx(conn, backfill=args.fx_backfill)
+    fs = reference.fx(conn, backfill=args.fx_backfill,
+                      progress=_fx_progress(args.quiet))
     print(f"  fx {fs.currencies}")
     if args.no_figi:
         print("  figi skipped (--no-figi)")
@@ -397,7 +410,7 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("--backfill", action="store_true", help="fx: fetch from 2016-07-01")
     rd.add_argument("--limit", type=int, default=None, help="figi: cap ISINs this run")
     rd.add_argument("--quiet", action="store_true",
-                    help="figi/marketcaps: no progress meter, only the final summary")
+                    help="fx/figi/marketcaps: no progress meter, only the summary")
 
     sub.add_parser("aggregate", help="classify transaction_norm + build aggregates (§6)")
 
@@ -408,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--no-marketcaps", action="store_true",
                     help="skip yfinance (slow/flaky); everything stays 'unverifiable'")
     bd.add_argument("--quiet", action="store_true",
-                    help="no figi/marketcaps progress meter, only the step summaries")
+                    help="no fx/figi/marketcaps progress meter, only the summaries")
 
     es = sub.add_parser("export-static", help="dump the read API to static JSON (§9)")
     es.add_argument("--out", default="dist", help="output directory (default: dist/)")

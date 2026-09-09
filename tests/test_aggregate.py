@@ -174,6 +174,49 @@ def test_gbp_row_uses_transaction_date_rate_not_today(classified):
     assert r["gross_value_sek"] == pytest.approx(r["gross_value"] * 12.9)
 
 
+def _classify_one(conn, *, valuta: str, volym: str = "100", pris: str = "10",
+                  instrumenttyp: str = "Aktie"):
+    """One clean Förvärv row, carried through to classify()."""
+    _seed_fx(conn)
+    fields = {n: "" for n in fi.FIELD_NAMES}
+    fields.update(
+        publiceringsdatum="2024-05-01 10:00:00", transaktionsdatum="2024-05-01 00:00:00",
+        lei_kod="LEI999", emittent="Y AB", karaktar="Förvärv",
+        instrumenttyp=instrumenttyp, volym=volym, volymsenhet="Antal", pris=pris,
+        valuta=valuta, status="Aktuell", person_i_ledande_stallning="P",
+    )
+    row = fi.ParsedRow(fi.row_hash([fields[n] for n in fi.FIELD_NAMES]), 0, fields)
+    leaf = fi.Leaf(date(2024, 5, 1), date(2024, 5, 1), [row], truncated=False)
+    ingest.write_leaf(conn, ingest._open_batch(conn, "t", leaf), leaf)
+    normalize.normalize(conn)
+    s = aggregate.classify(conn)
+    return conn.execute(
+        "SELECT exclude_reason, is_counted FROM transaction_norm WHERE lei = 'LEI999'"
+    ).fetchone(), s
+
+
+def test_currency_with_no_riksbank_series_reads_no_fx_series(db_conn):
+    """SCR is in FX_NO_SERIES — permanently unvaluable, not a fetch gap."""
+    row, s = _classify_one(db_conn, valuta="SCR")
+    assert row["is_counted"] == 0
+    assert row["exclude_reason"] == "no_fx_series"
+    assert s.no_fx_series_rows == 1
+    assert s.no_fx_rows == 0
+
+
+def test_unlisted_currency_still_reads_no_fx_rate(db_conn):
+    """A currency in neither tuple must stay LOUD — `no_fx_rate` fails doctor.
+
+    This is the half that matters: forgiving an unknown currency as
+    'no series' would silently uncount it the day FI adds one.
+    """
+    row, s = _classify_one(db_conn, valuta="JPY")
+    assert row["is_counted"] == 0
+    assert row["exclude_reason"] == "no_fx_rate"
+    assert s.no_fx_rows == 1
+    assert s.no_fx_series_rows == 0
+
+
 # ── outliers (§6.4) ───────────────────────────────────────────────────────
 def test_outlier_needs_a_market_cap_to_fire(classified):
     conn, s = classified
@@ -194,7 +237,10 @@ def test_outlier_excluded_but_unverifiable_counted(db_conn):
                  volym=str(vol), volymsenhet="Antal", pris=str(price), valuta="SEK",
                  status="Aktuell", person_i_ledande_stallning="P")
         return f, cap
-    specs = [mk("BIG", 100_000_000, 100_000_000, 3.0e11),   # 1e16 >> cap -> outlier
+    # 1e8 shares @ 5 000 SEK = 5e11 > the 3e11 cap. Unit price stays under
+    # MAX_EQUITY_UNIT_PRICE_SEK and volume != price, so this is a real outlier
+    # and not the §6.2.1 encoding error, which would claim it first.
+    specs = [mk("BIG", 100_000_000, 5_000, 3.0e11),         # 5e11 > cap -> outlier
              mk("OKAY", 1000, 50, 3.0e11),                   # tiny -> ok
              mk("NOCAP", 1000, 50, None)]                    # no cap -> unverifiable
     rows = [fi.ParsedRow(fi.row_hash([f[n] for n in fi.FIELD_NAMES]), 0, f)
@@ -318,3 +364,45 @@ def test_reaggregation_is_idempotent(db_conn, sample_export_bytes):
     aggregate.run(db_conn)
     n2 = db_conn.execute("SELECT COUNT(*), SUM(net_value_sek) FROM agg_company_period").fetchone()
     assert tuple(n1) == tuple(n2)
+
+
+# ── §6.2.1 implausible unit price — the market-cap-independent guard ────────
+def test_equity_with_absurd_unit_price_is_excluded(db_conn):
+    """Peab-shaped: FI put a total in `Pris`. No market cap needed to catch it."""
+    row, s = _classify_one(db_conn, valuta="SEK", volym="27993250", pris="240741950",
+                           instrumenttyp="Aktie")
+    assert row["is_counted"] == 0
+    assert row["exclude_reason"] == "implausible_unit_price"
+    assert s.implausible_price_rows == 1
+
+
+def test_volume_equals_price_on_a_bond_is_excluded(db_conn):
+    """Vostok-shaped: nominal written into both columns. The type gate alone
+    misses this — a bond legitimately prices at nominal — so the second arm
+    carries it."""
+    row, _ = _classify_one(db_conn, valuta="SEK", volym="1250000", pris="1250000",
+                           instrumenttyp="Obligation")
+    assert row["exclude_reason"] == "implausible_unit_price"
+
+
+def test_small_volume_equals_price_row_stays_counted(db_conn):
+    """100 shares at 100 SEK satisfies `volume == price` honestly.
+
+    This is why the arm carries AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK. Without the
+    magnitude guard the structural test would silently drop real trades — 24 of
+    them in the 2016-2026 corpus.
+    """
+    row, s = _classify_one(db_conn, valuta="SEK", volym="100", pris="100",
+                           instrumenttyp="Aktie")
+    assert row["is_counted"] == 1
+    assert row["exclude_reason"] is None
+    assert s.implausible_price_rows == 0
+
+
+def test_high_priced_bond_is_not_flagged(db_conn):
+    """A bond at nominal 1 000 000/unit is a convention, not an error — the
+    unit-price arm is gated on EQUITY_INSTRUMENT_TYPES for exactly this row."""
+    row, _ = _classify_one(db_conn, valuta="SEK", volym="3", pris="1000000",
+                           instrumenttyp="Obligation")
+    assert row["is_counted"] == 1
+    assert row["exclude_reason"] is None

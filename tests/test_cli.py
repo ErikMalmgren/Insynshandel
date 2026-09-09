@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import io
 
-from insynshandel.cli import _figi_progress, _marketcap_progress, _Progress
+from insynshandel.cli import (
+    _figi_progress,
+    _fx_progress,
+    _marketcap_progress,
+    _Progress,
+)
 from insynshandel.pipeline.reference import FigiSummary
 
 
@@ -45,3 +50,17 @@ def test_marketcap_progress_rotates_a_meter_per_provider(capsys):
     err = capsys.readouterr().err
     assert "marketcaps yahoo 1/2 (50%)" in err
     assert "marketcaps manual 1/1 (100%)" in err
+
+
+def test_progress_has_no_eta_before_the_first_item_lands():
+    out = io.StringIO()
+    meter = _Progress("fx", stream=out, min_interval_s=0)
+    meter(0, 8, "fetching USD")               # fx ticks at done=0; 0/0 has no rate
+    assert "fx 0/8 (0%) fetching USD elapsed 0s eta ?" in out.getvalue()
+
+
+def test_fx_progress_is_the_meter_itself(capsys):
+    assert _fx_progress(quiet=True) is None
+    cb = _fx_progress(quiet=False)
+    cb(1, 8, "USD 2510 rows")
+    assert "fx 1/8 (12%) USD 2510 rows" in capsys.readouterr().err

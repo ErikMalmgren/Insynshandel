@@ -57,9 +57,12 @@ def export(conn: sqlite3.Connection, out_dir: Path | str) -> ExportSummary:
     for period in config.EXPORT_PERIODS:
         lb = reads.leaderboard(conn, period)
         _write(out / f"leaderboard-{period}.json", lb, s)
-        # guard: the 0 sentinel must never escape market_cap_current (§6.4)
+        # guard: the 0 sentinel must never escape market_cap_current (§6.4).
+        # `pct_of_mcap < 0` was part of this test until 2026-09-09 — wrongly: the
+        # SQL already requires market_cap_sek > 0, so a negative pct means only
+        # net_value_sek < 0, i.e. a company whose insiders were net sellers.
         for e in lb.entries:
-            if e.market_cap == 0 or (e.pct_of_mcap is not None and e.pct_of_mcap < 0):
+            if e.market_cap == 0:
                 s.warnings.append(
                     f"{period}/{e.lei}: market_cap={e.market_cap} pct={e.pct_of_mcap}"
                 )

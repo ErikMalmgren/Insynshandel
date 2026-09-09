@@ -34,12 +34,19 @@ class FxSummary:
         return not self.errors
 
 
+# (done, total, detail) — one SWEA request per currency, and a backfill request
+# spans 2016->today, so the meter ticks *before* each fetch as well as after:
+# the interesting moment is the one currency currently in flight.
+FxProgress = Callable[[int, int, str], None]
+
+
 def fx(
     conn: sqlite3.Connection,
     client: riksbank.RiksbankClient | None = None,
     *,
     backfill: bool = False,
     days: int = 10,
+    progress: FxProgress | None = None,
 ) -> FxSummary:
     client = client or riksbank.RiksbankClient()
     start = (
@@ -48,11 +55,16 @@ def fx(
     )
     end = config.today()
     s = FxSummary()
-    for ccy in config.FX_CURRENCIES:
+    total = len(config.FX_CURRENCIES)
+    for done, ccy in enumerate(config.FX_CURRENCIES, start=1):
+        if progress:
+            progress(done - 1, total, f"fetching {ccy} {start}..{end}")
         try:
             obs = client.observations(ccy, start, end)
         except riksbank.RiksbankError as exc:
             s.errors.append(f"{ccy}: {exc}")
+            if progress:
+                progress(done, total, f"{ccy} FAILED")
             continue
         with immediate(conn):
             conn.executemany(
@@ -62,6 +74,8 @@ def fx(
                 [(ccy, d, v) for d, v in obs],
             )
         s.currencies[ccy] = len(obs)
+        if progress:
+            progress(done, total, f"{ccy} {len(obs)} rows")
     return s
 
 
@@ -264,7 +278,10 @@ def marketcaps(
             break
         batch = list(remaining.values())
         tick = (
-            (lambda done, total: progress(provider.name, done, total))
+            # p=provider: bound at creation, not call time. Harmless today (the
+            # callback only runs inside this iteration's provider.fetch), but
+            # B023 flags the shape, and the shape is one refactor from a bug.
+            (lambda done, total, p=provider: progress(p.name, done, total))
             if progress else None
         )
         quotes, failures = provider.fetch(batch, progress=tick)

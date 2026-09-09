@@ -68,8 +68,47 @@ MARKETCAP_PROVIDERS = [
     p.strip() for p in os.environ.get("INSYN_MARKETCAP_PROVIDERS", "yahoo,manual").split(",")
     if p.strip()
 ]
-FX_CURRENCIES = ("USD", "EUR", "GBP", "CAD")   # SWEA series exist for these
+# Every currency in the register that the Riksbank SWEA API publishes a series
+# for. Must stay in sync with `sources.riksbank.SERIES`.
+FX_CURRENCIES = ("USD", "EUR", "GBP", "CAD", "CHF", "NOK", "DKK", "RUB")
+# Currencies that appear in the register and have **no** SWEA series at all —
+# verified against https://api.riksbank.se/swea/v1/Series (117 series) on
+# 2026-09-09. Rows in these convert to nothing and are excluded as
+# `no_fx_series`: a documented impossibility, not a fetch gap.
+#
+# A currency missing from BOTH tuples yields `no_fx_rate`, which fails `doctor`.
+# That asymmetry is the point — a new currency must surface loudly rather than
+# be forgiven by a catch-all. Add it to FX_CURRENCIES if a series exists, or
+# here (with the date you checked) if one does not.
+FX_NO_SERIES = ("BND", "BSD", "BWP", "SCR", "SVC")
 MARKETCAP_DEGRADED_FLOOR = 0.5                 # success ratio below which a provider is 'degraded'
+
+# ── Implausible-price guard (§6.2.1) ────────────────────────────────────────
+# FI sometimes writes a TOTAL amount into the `Pris` column, so volume*price
+# squares it. Peab 2018-03-23 reads 27,993,250 x 240,741,950 SEK = 6.7
+# quadrillion. Unlike the outlier rule this needs no market cap, so it protects
+# the ~80% of companies that have none.
+#
+# Instrument types whose `Pris` is genuinely a PER-UNIT price. Debt is absent on
+# purpose: a bond legitimately prices at nominal (1,000,000/unit),
+# Kapitalandelsbevis and Företagscertifikat at 10k+. Derived from the 25-value
+# instrument_type vocabulary of the 2016-2026 corpus on 2026-09-09 — a type not
+# listed here is never flagged by the unit-price arm, so add new ones as FI
+# introduces them.
+EQUITY_INSTRUMENT_TYPES = (
+    "Aktie", "", "BTA (betald tecknad aktie)", "BTU (betald tecknad unit)",
+    "Teckningsrätt", "Teckningsrätt/Uniträtt", "Interimsaktie", "Depåbevis",
+    "Inlösenaktie", "Inlösenrätt",
+)
+# No Swedish share has traded near this. The highest legitimate unit price in
+# the corpus is Mangold at ~5,750 SEK; the lowest bad one is ~12,568. The gap is
+# wide, so the exact value is not delicate.
+MAX_EQUITY_UNIT_PRICE_SEK = 10_000.0
+# `volume == price` means FI put the same amount in both columns. That is a
+# structural tell, but 100 shares at 100 SEK satisfies it honestly — the
+# magnitude floor is what makes the test safe. 24 small rows legitimately match
+# and stay counted; exactly one row in the corpus exceeds the floor.
+AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK = 1_000_000_000.0
 
 # ── Aggregate windows (§6.5) — anchored to config.today(), not MAX(tx_date) ──
 AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")

@@ -25,11 +25,33 @@ from .fx import FxTable
 # The ordered §6.2 filter is the if/elif chain in classify(); the FIRST match
 # wins, so its order is the contract. For reference / doctor:
 #   no_lei -> not_current -> nature_not_counted -> volume_unit
-#   -> unparseable_number -> no_fx_rate -> outlier -> (counted)
+#   -> unparseable_number -> no_fx_series / no_fx_rate
+#   -> implausible_unit_price -> outlier -> (counted)
+#
+# `no_fx_series` and `no_fx_rate` are the same branch split by cause: the
+# Riksbank publishes no series for this currency at all (permanent, listed in
+# config.FX_NO_SERIES), versus we simply have not fetched the rate (fixable,
+# and a hard `doctor` failure). Never collapse them — the second is a bug.
 EXCLUDE_REASONS = (
     "no_lei", "not_current", "nature_not_counted", "volume_unit",
-    "unparseable_number", "no_fx_rate", "outlier",
+    "unparseable_number", "no_fx_series", "no_fx_rate",
+    "implausible_unit_price", "outlier",
 )
+
+
+def _implausible_price(row, fx_rate: float, gross_sek: float) -> bool:
+    """FI wrote a total amount where a unit price belongs (§6.2.1).
+
+    Two arms, both needed. The type gate alone misses a bond whose nominal was
+    written into both columns; `volume == price` alone misses an equity row
+    where only `Pris` is wrong. Deliberately independent of market cap — it is
+    the only encoding guard the ~80% of companies without one ever get.
+    """
+    if (row["instrument_type"] in config.EQUITY_INSTRUMENT_TYPES
+            and row["price"] * fx_rate > config.MAX_EQUITY_UNIT_PRICE_SEK):
+        return True
+    return (row["volume"] == row["price"]
+            and gross_sek > config.AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK)
 
 
 @dataclass
@@ -41,6 +63,8 @@ class ClassifySummary:
     by_verification: dict[str, int] = field(default_factory=dict)
     market_caps_available: int = 0
     no_fx_rows: int = 0
+    no_fx_series_rows: int = 0
+    implausible_price_rows: int = 0
 
     @property
     def ok(self) -> bool:
@@ -105,7 +129,7 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
 
     rows = conn.execute(
         "SELECT raw_id, lei, pdmr, nature, transaction_date, volume, price, "
-        "currency, volume_unit, status FROM transaction_norm"
+        "currency, volume_unit, status, instrument_type FROM transaction_norm"
     ).fetchall()
     s.rows = len(rows)
 
@@ -143,13 +167,20 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
         elif r["volume"] is None or r["price"] is None:
             reason = "unparseable_number"
         elif gross_sek is None:
-            reason = "no_fx_rate"
+            reason = ("no_fx_series" if r["currency"] in config.FX_NO_SERIES
+                      else "no_fx_rate")
+        elif _implausible_price(r, fx_rate, gross_sek):
+            reason = "implausible_unit_price"
         elif verification == "outlier":
             reason = "outlier"
         is_counted = 1 if reason is None else 0
 
         if reason == "no_fx_rate":
             s.no_fx_rows += 1
+        elif reason == "no_fx_series":
+            s.no_fx_series_rows += 1
+        elif reason == "implausible_unit_price":
+            s.implausible_price_rows += 1
         s.by_reason[reason or "_counted"] = s.by_reason.get(reason or "_counted", 0) + 1
         s.by_verification[verification] = s.by_verification.get(verification, 0) + 1
         if is_counted:

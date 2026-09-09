@@ -200,8 +200,18 @@ Convert at the rate for the row's **`transaction_date`**, not today's rate.
 
 Fall back to the latest available rate only when `transaction_date` is in the
 future relative to the series (shouldn't happen) or the currency has no series
-at all — and in that case set `gross_value_sek = NULL` and
-`exclude_reason = 'no_fx_rate'` rather than guessing.
+at all — and in that case set `gross_value_sek = NULL` and an exclude reason
+rather than guessing. **Which** reason is the point:
+
+| Reason | Meaning | `doctor` |
+| --- | --- | --- |
+| `no_fx_series` | the currency is in `config.FX_NO_SERIES` — the Riksbank publishes no SWEA series for it, verified by hand | tolerated, reported as INFO |
+| `no_fx_rate` | we simply have not fetched the rate | **hard failure** |
+
+A currency in neither `FX_CURRENCIES` nor `FX_NO_SERIES` falls to `no_fx_rate`
+and fails the build. That asymmetry is deliberate: the day FI publishes a
+transaction in a currency nobody has classified, it must surface loudly instead
+of being forgiven by a catch-all and silently uncounted.
 
 #### 6.3.2.1 This applies to the backfill too
 
@@ -232,7 +242,38 @@ insyn aggregate              # needs BOTH fx_rate and market_cap populated
 
 Rows whose currency has no rate on file come out `NULL` with
 `exclude_reason = 'no_fx_rate'` — a visible, countable failure rather than a
-silent zero. Check that count is 0 after the backfill.
+silent zero. Check that count is 0 after the backfill. Currencies the Riksbank
+does not publish at all get `no_fx_series` instead (§6.3.2); that count is
+expected to be non-zero and small.
+
+#### 6.2.1 Implausible unit price — the market-cap-independent guard
+
+FI sometimes writes a **total amount into the `Pris` column**, so `volume *
+price` squares it. Peab 2018-03-23 reads `27,993,250 x 240,741,950 SEK` = 6.7
+quadrillion. Left alone these dominate every aggregate: 161 rows carried 99.99%
+of the counted SEK total across the 2016-2026 corpus.
+
+The outlier rule (§6.4) cannot catch them, because it needs a market cap and
+only ~20% of issuers have one. This rule needs none, so it protects the other
+80%. Two arms, **both required**:
+
+1. `instrument_type` in `config.EQUITY_INSTRUMENT_TYPES` **and** the
+   transaction-date SEK unit price exceeds `MAX_EQUITY_UNIT_PRICE_SEK`
+   (10,000). Debt is excluded from the gate on purpose: a bond legitimately
+   prices at nominal, `Kapitalandelsbevis` and `Företagscertifikat` at 10k+.
+2. `volume == price` **and** `gross_value_sek` exceeds
+   `AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK` (1 bn). Arm 1 misses a bond with its
+   nominal in both columns; arm 2 catches it. The magnitude floor is what makes
+   the structural test safe — 100 shares at 100 SEK satisfies `volume == price`
+   honestly, and 24 such rows in the corpus stay counted.
+
+Neither threshold is delicate: the highest legitimate equity unit price in the
+corpus is Mangold at ~5,750 SEK and the lowest bad one is ~12,568.
+
+> **Calibration is a judgment call, so record it.** The type list was derived
+> from the 25-value `instrument_type` vocabulary on 2026-09-09. A type FI adds
+> later is never flagged by arm 1 until someone adds it — the same
+> fail-loud-not-silently trade-off as `config.FX_NO_SERIES`.
 
 #### 6.3.3 Proportionality
 
@@ -507,13 +548,34 @@ therefore `unverifiable` (§6.4) — which is the correct outcome, not a bug.
 - Every row of a company with `market_cap_sek = 0` has `verification = 'unverifiable'`
   and **is** included in `net_value_sek`. Assert this — the common mistake is
   silently dropping them.
-- `SELECT COUNT(*) FROM transaction_norm WHERE verification = 'outlier'` is small
-  (single digits over the whole backfill). A large number means the market cap
-  join is broken, not that the register is full of errors.
+- Outliers **not explained by §6.2.1** are few — but count them as
+  `exclude_reason = 'outlier'`, never as "verification = 'outlier' minus
+  implausible_unit_price". `exclude_reason` holds the FIRST hit of the ordered
+  §6.2 chain and `outlier` is its second-to-last rule, so a row excluded earlier
+  (`nature_not_counted`, `not_current`, `volume_unit`) keeps
+  `verification = 'outlier'` while the cap never judged it.
+- Measured over the full 2016-2026 backfill on 2026-09-09: 218 rows carry
+  `verification = 'outlier'`; 20 are tagged `implausible_unit_price`, 189 were
+  excluded by an earlier rule, and **9** actually reached the cap comparison and
+  failed it. The plan originally predicted "single digits" — for this number,
+  that was right. (An earlier revision of this bullet claimed "196 encoding
+  errors / 22 genuine"; that came from the minus-implausible_unit_price count
+  and was wrong.)
+- The register really does contain impossible source rows — a Swedbank trade at
+  9e16 SEK against a 428 bn cap, ÅF at 3.6e13 — but 78% of them are excluded
+  before the cap is consulted, so they are FI's error, not a join failure.
+- Some of the 9 are large-but-real trades measured against a market cap from
+  a different year (§6.4 compares a historical transaction to the *current*
+  cap). Revisit once `market_cap` has accumulated dated snapshots.
 ### 11.2.3 Currency (§6.3)
 
 - `SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = 'no_fx_rate'`
-  → **must be 0** after a successful `refdata fx --backfill`.
+  → **must be 0** after a successful `refdata fx --backfill`. If it is not, a
+  currency is missing from `config.FX_CURRENCIES` — add it (SWEA has a series)
+  or to `config.FX_NO_SERIES` (it does not), then re-run `insyn aggregate`.
+- `exclude_reason = 'no_fx_series'` is expected to be non-zero: as of 2026-09-09
+  the register carries 13 currencies, of which SCR and BWP have no SWEA series
+  (6 rows over the whole backfill). `doctor` prints these as INFO, not FAIL.
 - A GBP row from 2016 uses a 2016 rate, not today's. Check one directly:
   `fx_rate_date` must be within a few days of `transaction_date`, never near
   `date('now')`.

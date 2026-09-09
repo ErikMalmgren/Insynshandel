@@ -141,6 +141,24 @@ def _no_coverage_for_truncated(conn: sqlite3.Connection) -> tuple[bool, str]:
     return bad == 0, f"{bad} coverage rows inside a truncated window"
 
 
+def _currency_coverage(conn: sqlite3.Connection) -> tuple[bool, str]:
+    """Every non-SEK currency must have rates, or be a known no-series currency.
+
+    A currency in neither set is the failure that matters: it means the register
+    grew a currency nobody has classified yet, and its rows are silently
+    uncounted. Add it to ``config.FX_CURRENCIES`` or ``config.FX_NO_SERIES``.
+    """
+    used = {r["currency"] for r in conn.execute(
+        "SELECT DISTINCT currency FROM transaction_norm WHERE currency <> 'SEK'")}
+    have = {r["currency"] for r in conn.execute("SELECT DISTINCT currency FROM fx_rate")}
+    miss = used - have - set(config.FX_NO_SERIES)
+    return not miss, (
+        f"unclassified currencies: {sorted(miss)} — add to config.FX_CURRENCIES "
+        f"(if SWEA has a series) or config.FX_NO_SERIES"
+        if miss else f"{len(used)} non-SEK currencies, all classified"
+    )
+
+
 def _dup_index_holds(conn: sqlite3.Connection) -> tuple[bool, str]:
     row = conn.execute(
         "SELECT row_hash, ordinal FROM raw_transaction WHERE superseded_at IS NULL LIMIT 1"
@@ -302,7 +320,8 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
                 "SELECT COUNT(*) FROM transaction_norm WHERE is_counted = 0 "
                 "AND (exclude_reason IS NULL OR exclude_reason NOT IN "
                 "('no_lei','not_current','nature_not_counted','volume_unit',"
-                "'unparseable_number','no_fx_rate','outlier'))"
+                "'unparseable_number','no_fx_series','no_fx_rate',"
+                "'implausible_unit_price','outlier'))"
             ).fetchone()[0]) == 0,
             f"{bad} uncounted rows with a missing/unknown reason",
         ),
@@ -323,13 +342,22 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         "SELECT 1 FROM market_cap_current WHERE market_cap_sek IS NOT NULL LIMIT 1"
     ).fetchone())
     if have_mcap:
+        # The check exists to catch a broken market-cap join, so it must count
+        # only rows the cap comparison itself rejected: `exclude_reason` is the
+        # FIRST hit of the ordered §6.2 chain, and `outlier` is its second-to-
+        # last rule. Filtering instead on `<> 'implausible_unit_price'` swept in
+        # every row excluded EARLIER (nature_not_counted, not_current,
+        # volume_unit) that `verification` still labels an outlier — 189 of 198
+        # on 2026-09-09, none of which the cap ever judged.
         c.check(
-            "outlier count is small (§11.2.1)",
+            "unexplained outlier count is small (§11.2.1)",
             lambda: (
                 (n := conn.execute(
-                    "SELECT COUNT(*) FROM transaction_norm WHERE verification = 'outlier'"
+                    "SELECT COUNT(*) FROM transaction_norm "
+                    "WHERE verification = 'outlier' AND exclude_reason = 'outlier'"
                 ).fetchone()[0]) < 50,
-                f"{n} outliers (a large number means the market-cap join is broken)",
+                (f"{n} rows reached the market-cap comparison and failed it with "
+                 f"no earlier explanation (a large number means the join is broken)"),
             ),
         )
         c.check(
@@ -339,13 +367,22 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
                     "SELECT COUNT(*) FROM transaction_norm WHERE verification = "
                     "'unverifiable' AND is_counted = 0 AND exclude_reason NOT IN "
                     "('no_lei','not_current','nature_not_counted','volume_unit',"
-                    "'unparseable_number','no_fx_rate')"
+                    "'unparseable_number','no_fx_series','no_fx_rate',"
+                    "'implausible_unit_price')"
                 ).fetchone()[0] == 0,
                 "no unverifiable row was dropped for being unverifiable",
             ),
         )
     else:
         c.skip("outlier checks (§11.2.1)", "no market caps — every row is unverifiable")
+
+    # § 6.2.1 — the encoding guard. Measured, not pass/fail: a non-zero count is
+    # the rule working. Zero would be the surprise.
+    n_imp = conn.execute(
+        "SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = 'implausible_unit_price'"
+    ).fetchone()[0]
+    print(f"  INFO  {n_imp} rows excluded as implausible_unit_price — FI wrote a "
+          f"total into the Pris column (§6.2.1)")
 
     # § 11.2.3 — currency
     have_fx = bool(conn.execute("SELECT 1 FROM fx_rate LIMIT 1").fetchone())
@@ -360,17 +397,17 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             ),
         )
         c.check(
-            "every currency is covered by fx_rate + SEK (§11.2.3)",
-            lambda: (
-                len(miss := {
-                    r["currency"] for r in conn.execute(
-                        "SELECT DISTINCT currency FROM transaction_norm WHERE currency <> 'SEK'"
-                    )
-                } - {r["currency"] for r in conn.execute("SELECT DISTINCT currency FROM fx_rate")}
-                ) == 0,
-                f"currencies with no series: {sorted(miss)}",
-            ),
+            "every currency is covered by fx_rate, SEK, or FX_NO_SERIES (§11.2.3)",
+            lambda: _currency_coverage(conn),
         )
+        # Rows we can never value, by currency. Not pass/fail — a measured fact
+        # about the register, like the LEI line above.
+        for r in conn.execute(
+            "SELECT currency, COUNT(*) n FROM transaction_norm "
+            "WHERE exclude_reason = 'no_fx_series' GROUP BY currency ORDER BY n DESC"
+        ):
+            print(f"  INFO  {r['n']} rows in {r['currency']} — no Riksbank series, "
+                  f"excluded as no_fx_series (config.FX_NO_SERIES)")
         c.check(
             "non-SEK rows valued at a transaction-date rate, not today's (§11.2.3)",
             lambda: (
@@ -422,13 +459,20 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             lambda: _leaderboard_complete(conn, s.out_dir),
         )
         c.check(
-            "no leaderboard entry has market_cap 0 or negative pct_of_mcap (§9)",
+            "no leaderboard entry has market_cap 0 — the §6.4 sentinel escaped",
             lambda: (not s.warnings, "; ".join(s.warnings) or "clean"),
         )
         c.check(
-            "dist total size is a few MB, not tens (§9)",
-            lambda: (s.bytes < 25_000_000, f"{s.bytes / 1_000_000:.2f} MB"),
+            # §9's real worry is a per-company file carrying full history. Assert
+            # that, not its byte-count proxy — the corpus outgrew "a few MB".
+            "no company file exceeds COMPANY_TX_LIMIT transactions (§9)",
+            lambda: _company_tx_capped(s.out_dir),
         )
+        # Size is a measured fact, not a gate: the cap above is the invariant, and
+        # a threshold here only re-fires as the register grows. Promote it back to
+        # a check if `dist/` ever gets committed to a branch (ingest.yml 6b).
+        print(f"  INFO  dist/ is {s.bytes / 1_000_000:.2f} MB over {len(files)} files "
+              f"— bounded by COMPANY_TX_LIMIT, not by a byte budget")
         c.check(
             "companies.json carries no person data (§8.1)",
             lambda: (
@@ -436,6 +480,22 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
                 "no pdmr field in the company index",
             ),
         )
+
+
+def _company_tx_capped(dist) -> tuple[bool, str]:
+    """§9's actual worry: a company file carrying full history, not 50 rows."""
+    import json
+
+    worst_lei, worst_n, over = None, 0, 0
+    for f in (dist / "company").glob("*.json"):
+        n = len(json.loads(f.read_text(encoding="utf-8")).get("recent_transactions") or [])
+        if n > worst_n:
+            worst_lei, worst_n = f.stem, n
+        if n > config.COMPANY_TX_LIMIT:
+            over += 1
+    if over:
+        return False, f"{over} files over the {config.COMPANY_TX_LIMIT}-transaction cap"
+    return True, f"max {worst_n}/{config.COMPANY_TX_LIMIT} ({worst_lei})"
 
 
 def _leaderboard_complete(conn: sqlite3.Connection, dist) -> tuple[bool, str]:

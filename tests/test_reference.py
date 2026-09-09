@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -48,6 +48,39 @@ def test_fx_backfill_starts_at_register_epoch(db_conn):
     fake = FakeRiksbank({})
     reference.fx(db_conn, fake, backfill=True)
     assert all(call[1] == date(2016, 7, 1) for call in fake.calls)
+
+
+def test_fx_progress_brackets_every_currency_fetch(db_conn):
+    from insynshandel import config
+
+    fake = FakeRiksbank({"USD": [("2026-09-01", 9.5)]})
+    seen: list[tuple[int, int, str]] = []
+    reference.fx(db_conn, fake, days=7,
+                 progress=lambda d, t, detail: seen.append((d, t, detail)))
+
+    n = len(config.FX_CURRENCIES)
+    assert len(seen) == 2 * n                       # a tick before and after each
+    window = f"{config.today() - timedelta(days=7)}..{config.today()}"
+    assert seen[0] == (0, n, f"fetching {config.FX_CURRENCIES[0]} {window}")
+    assert seen[1] == (1, n, "USD 1 rows")
+    assert seen[-1][:2] == (n, n)                   # ends on total, so the meter closes
+
+
+def test_fx_progress_reports_a_failed_currency(db_conn):
+    from insynshandel.sources.riksbank import RiksbankError
+
+    class Boom:
+        def observations(self, *a):
+            raise RiksbankError("429")
+
+    seen: list[tuple[int, int, str]] = []
+    s = reference.fx(db_conn, Boom(),
+                     progress=lambda d, t, detail: seen.append((d, t, detail)))
+    assert not s.ok
+    # a currency that raised still advances the counter — a stalled meter reads
+    # as a hang, which is the opposite of what happened
+    assert [d for d, _, _ in seen][-1] == len(seen) // 2
+    assert seen[1][2].endswith("FAILED")
 
 
 def test_fx_error_is_recorded_not_raised(db_conn):

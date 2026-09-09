@@ -23,6 +23,10 @@ SERIES: dict[str, str] = {
     "EUR": "SEKEURPMI",
     "GBP": "SEKGBPPMI",
     "CAD": "SEKCADPMI",
+    "CHF": "SEKCHFPMI",
+    "NOK": "SEKNOKPMI",
+    "DKK": "SEKDKKPMI",
+    "RUB": "SEKRUBPMI",
 }
 
 # ~3 requests/minute before a 429 (§6.3.1). Only matters if a range is rejected
