@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ... import config
 from ..openfigi import format_ticker
-from .base import Company, FetchFailure, MarketCapQuote
+from .base import Company, FetchFailure, FetchProgress, MarketCapQuote
 
 log = logging.getLogger(__name__)
 
@@ -59,14 +59,23 @@ class YahooProvider:
             return None, FetchFailure(company.lei, symbol, reason)
 
     def fetch(
-        self, companies: list[Company]
+        self, companies: list[Company], *, progress: FetchProgress | None = None
     ) -> tuple[list[MarketCapQuote], list[FetchFailure]]:
         quotes: list[MarketCapQuote] = []
         failures: list[FetchFailure] = []
+        addressable = sum(1 for c in companies if self.symbol_for(c) is not None)
+        done = 0
         with ThreadPoolExecutor(max_workers=5) as pool:
-            for quote, failure in pool.map(self._one, companies):
+            # ordered map, not as_completed: a wedged company freezes the counter,
+            # which is exactly the signal yfinance hangs need (§7.4).
+            for company, (quote, failure) in zip(
+                companies, pool.map(self._one, companies), strict=True
+            ):
                 if quote is not None:
                     quotes.append(quote)
                 if failure is not None:
                     failures.append(failure)
+                if progress and addressable and self.symbol_for(company) is not None:
+                    done += 1
+                    progress(done, addressable)
         return quotes, failures

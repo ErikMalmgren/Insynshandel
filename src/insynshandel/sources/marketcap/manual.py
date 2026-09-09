@@ -9,7 +9,7 @@ from __future__ import annotations
 import csv
 
 from ... import config
-from .base import Company, FetchFailure, MarketCapQuote
+from .base import Company, FetchFailure, FetchProgress, MarketCapQuote
 
 _MIN_AS_OF = "2000-01-01"
 
@@ -33,14 +33,19 @@ class ManualProvider:
         return company.lei if company.lei in self._rows else None
 
     def fetch(
-        self, companies: list[Company]
+        self, companies: list[Company], *, progress: FetchProgress | None = None
     ) -> tuple[list[MarketCapQuote], list[FetchFailure]]:
         quotes: list[MarketCapQuote] = []
         failures: list[FetchFailure] = []
+        addressable = sum(1 for c in companies if self.symbol_for(c) is not None)
+        done = 0
         for c in companies:
             row = self._rows.get(c.lei)
             if row is None:
                 continue
+            if progress and addressable:
+                done += 1
+                progress(done, addressable)
             try:
                 as_of = row["as_of"].strip()
                 # a future as_of would become the permanent MAX(as_of) 'current'

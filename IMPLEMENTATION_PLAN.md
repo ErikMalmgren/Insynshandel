@@ -26,6 +26,7 @@ Phases are ordered so a later decision cannot invalidate earlier work.
 | 4b | **Phase 5** — reference data (OpenFIGI, FX, market caps) | [`plan/05-refdata.md`](plan/05-refdata.md) | 3.6k |
 | 5 | **Phase 6** — static JSON export | [`plan/06-static.md`](plan/06-static.md) | 0.5k |
 | 6 | **Phase 4** — API | [`plan/04-api.md`](plan/04-api.md) | 1.7k |
+| 7 | **Phase 7** — the `insyn.malmgren.dev` frontend | [`plan/07-frontend.md`](plan/07-frontend.md) | 2.6k |
 | — | Scheduling & deployment | [`plan/deploy.md`](plan/deploy.md) | 3.0k |
 | — | Testing and `insyn doctor` | [`plan/testing.md`](plan/testing.md) | 0.4k |
 | — | Rationale, known bugs, rejected options, README spec | [`plan/background.md`](plan/background.md) | 4.5k |
@@ -50,6 +51,7 @@ Section numbers are **stable identifiers** and unchanged by the split.
 | §10 deployment | `plan/deploy.md` |
 | §11 intro · §11.4 unit tests | `plan/testing.md` |
 | §12 bugs · §13 considerations · §14 decision log · §15 README | `plan/background.md` |
+| §16 frontend | `plan/07-frontend.md` |
 | §0 decisions · §0.1 rejected alternatives | this file, below |
 
 ## Invariants
@@ -70,7 +72,7 @@ These are settled. Do not re-litigate them during implementation.
 | DB access | **Plain `sqlite3` + hand-written SQL** in `.sql` migration files. No ORM. (`peewee` in the current venv is a `yfinance` transitive dep, not a choice.) |
 | API | **FastAPI + uvicorn**. Pydantic response models double as the schema for the static JSON export. |
 | Packaging | **`uv`** — also pins the interpreter, so all five environments match (§2.1). Not installed yet: `curl -LsSf https://astral.sh/uv/install.sh \| sh`. |
-| Frontend hosting | **Stays on GitHub Pages, unchanged.** See §1.2. |
+| Frontend hosting | **GitHub Pages**, but on this repo at `insyn.malmgren.dev`, not in the `www.malmgren.dev` repo. Amended by §16.0; the reasoning in §1.2 still holds. |
 | Aggregation key | **Transaktionsdatum** (economic date), *not* Publiceringsdatum (which is only used to window the fetch). |
 | Currency | **Everything converted to SEK** at the transaction-date Riksbank rate. One currency everywhere; no per-currency buckets. See §6.3. |
 | Counted transactions | **`Förvärv` (+1) and `Avyttring` (−1) only.** Everything else excluded with a recorded reason. One definition, no profile switch. See §6.1. |

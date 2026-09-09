@@ -28,3 +28,15 @@ Lån återgång ökning,0,0,lending,Loan return
 Lån återgång minskning,0,0,lending,Loan return
 Inlösen egenutfärdat instrument,0,0,corporate,Redemption of own issued instrument
 Utfärdande av instrument,0,0,derivative,Writing an instrument
+Koncernintern överföring ökning,0,0,internal,Intra-group transfer — increase
+Koncernintern överföring minskning,0,0,internal,Intra-group transfer — decrease
+Arv ökning,0,0,non_market,Inheritance received
+Arv minskning,0,0,non_market,Inheritance passed on
+Arv lämnad,0,0,non_market,Inheritance given
+Bodelning ökning,0,0,non_market,Division of marital property — increase
+Bodelning minskning,0,0,non_market,Division of marital property — decrease
+Bodelning förvärv,0,0,non_market,Division of marital property — acquisition leg
+Bodelning avyttring,0,0,non_market,Division of marital property — disposal leg
+Fission ökning,0,0,corporate,Demerger mechanics — not a discretionary purchase
+Fission minskning,0,0,corporate,Demerger mechanics
+Blankning,0,0,derivative,Short sale — no long position acquired or disposed

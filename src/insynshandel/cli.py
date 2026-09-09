@@ -9,10 +9,97 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import date
 
 from . import config, db
 from .pipeline import aggregate, ingest, normalize, reference
+
+
+class _Progress:
+    """A one-line, self-erasing progress meter for the long refdata steps.
+
+    On a TTY it rewrites a single line at most 4x/s; piped to a log (cron,
+    systemd) it emits a plain line at most every 30 s so a full FIGI run costs
+    ~2 lines/minute instead of one per ISIN. ETA is measured, not derived from
+    the client's request spacing.
+    """
+
+    def __init__(self, label: str, *, stream=None, min_interval_s: float | None = None):
+        self.label = label
+        self.stream = stream if stream is not None else sys.stderr
+        self.tty = bool(getattr(self.stream, "isatty", lambda: False)())
+        self.every = min_interval_s if min_interval_s is not None else (
+            0.25 if self.tty else 30.0
+        )
+        self.start = time.monotonic()
+        self._last = 0.0
+        self._dirty = False
+
+    @staticmethod
+    def _hms(seconds: float) -> str:
+        s = max(0, int(seconds))
+        return f"{s // 3600}h{s % 3600 // 60:02d}m" if s >= 3600 else (
+            f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+        )
+
+    def __call__(self, done: int, total: int, detail: object = None) -> None:
+        now = time.monotonic()
+        last = done >= total
+        if not last and now - self._last < self.every:
+            return
+        self._last = now
+        elapsed = now - self.start
+        eta = (total - done) * (elapsed / done) if done else 0.0
+        pct = 100 * done / total if total else 100.0
+        line = (f"  {self.label} {done}/{total} ({pct:.0f}%)"
+                + (f" {detail}" if detail else "")
+                + f" elapsed {self._hms(elapsed)} eta {self._hms(eta)}")
+        if self.tty:
+            self.stream.write("\r\x1b[2K" + line)
+            self._dirty = True
+        else:
+            self.stream.write(line + "\n")
+        self.stream.flush()
+        if last:
+            self.done()
+
+    def done(self) -> None:
+        if self._dirty:
+            self.stream.write("\n")
+            self.stream.flush()
+            self._dirty = False
+
+
+def _figi_progress(quiet: bool):
+    """Adapt :class:`_Progress` to ``reference.figi``'s (done, total, summary)."""
+    if quiet:
+        return None
+    meter = _Progress("figi")
+    return lambda done, total, fs: meter(
+        done, total,
+        f"resolved={fs.resolved} negative={fs.negative} err={fs.transport_errors}",
+    )
+
+
+def _marketcap_progress(quiet: bool):
+    """Adapt :class:`_Progress` to ``reference.marketcaps``'s (provider, done, total).
+
+    Providers run in sequence, so one meter is rotated per provider — the
+    outgoing one is flushed first or its half-written TTY line is overwritten.
+    """
+    if quiet:
+        return None
+    state: dict[str, object] = {"name": None, "meter": None}
+
+    def tick(provider: str, done: int, total: int) -> None:
+        if state["name"] != provider:
+            if state["meter"] is not None:
+                state["meter"].done()
+            state["name"], state["meter"] = provider, _Progress(f"marketcaps {provider}")
+        state["meter"](done, total)
+
+    return tick
 
 
 def _print_summary(s: ingest.IngestSummary) -> None:
@@ -182,13 +269,15 @@ def _cmd_refdata(args: argparse.Namespace) -> int:
             print(f"refdata fx: {fs.currencies}" + (f" errors={fs.errors}" if fs.errors else ""))
             rc |= 0 if fs.ok else 1
         elif step == "figi":
-            gs = reference.figi(conn, limit=args.limit)
+            gs = reference.figi(conn, limit=args.limit,
+                                progress=_figi_progress(args.quiet))
             print(f"refdata figi: asked={gs.asked} resolved={gs.resolved} "
                   f"negative={gs.negative} transport_errors={gs.transport_errors}")
         elif step == "marketcaps":
             reference.build_companies(conn)
             try:
-                ms = reference.marketcaps(conn, standalone=True)
+                ms = reference.marketcaps(
+                    conn, standalone=True, progress=_marketcap_progress(args.quiet))
             except SystemExit:
                 print("refdata marketcaps: provider degraded (exit 1)", file=sys.stderr)
                 return 1
@@ -214,7 +303,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if args.no_figi:
         print("  figi skipped (--no-figi)")
     else:
-        gs = reference.figi(conn, limit=args.figi_limit)
+        gs = reference.figi(conn, limit=args.figi_limit,
+                            progress=_figi_progress(args.quiet))
         print(f"  figi resolved={gs.resolved} negative={gs.negative}")
     cs = reference.build_companies(conn)
     print(f"  companies {cs.companies} ({cs.with_ticker} with ticker)")
@@ -222,7 +312,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         why = "--no-marketcaps" if args.no_marketcaps else "no company has a ticker yet"
         print(f"  marketcaps skipped ({why}) — every company will be 'unverifiable'")
     else:
-        ms = reference.marketcaps(conn, standalone=False)   # degraded => warn, continue
+        ms = reference.marketcaps(               # degraded => warn, continue
+            conn, standalone=False, progress=_marketcap_progress(args.quiet))
         print(f"  marketcaps written={ms.written}"
               + (f" DEGRADED {ms.degraded}" if ms.degraded else ""))
 
@@ -305,6 +396,8 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("steps", nargs="+", choices=["fx", "figi", "marketcaps"])
     rd.add_argument("--backfill", action="store_true", help="fx: fetch from 2016-07-01")
     rd.add_argument("--limit", type=int, default=None, help="figi: cap ISINs this run")
+    rd.add_argument("--quiet", action="store_true",
+                    help="figi/marketcaps: no progress meter, only the final summary")
 
     sub.add_parser("aggregate", help="classify transaction_norm + build aggregates (§6)")
 
@@ -314,6 +407,8 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--no-figi", action="store_true", help="skip the OpenFIGI step")
     bd.add_argument("--no-marketcaps", action="store_true",
                     help="skip yfinance (slow/flaky); everything stays 'unverifiable'")
+    bd.add_argument("--quiet", action="store_true",
+                    help="no figi/marketcaps progress meter, only the step summaries")
 
     es = sub.add_parser("export-static", help="dump the read API to static JSON (§9)")
     es.add_argument("--out", default="dist", help="output directory (default: dist/)")

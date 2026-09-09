@@ -117,6 +117,26 @@ def test_figi_negative_is_cached(db_conn, sample_export_bytes):
     assert len(rows) == 3  # NULL rows written so they are not re-queried
 
 
+def test_figi_progress_fires_once_per_isin_including_errors(db_conn, sample_export_bytes):
+    _ingest(db_conn, sample_export_bytes)
+    isins = [
+        r["isin"] for r in db_conn.execute(
+            "SELECT DISTINCT isin FROM transaction_norm WHERE isin <> '' LIMIT 3"
+        )
+    ]
+    fake = FakeFigi({isins[0]: ConnectionError("reset")})   # 1 error, 2 negatives
+    seen: list[tuple[int, int, int, int]] = []
+    s = reference.figi(
+        db_conn, fake, limit=3,
+        progress=lambda done, total, fs: seen.append(
+            (done, total, fs.negative, fs.transport_errors)
+        ),
+    )
+    assert [d for d, *_ in seen] == [1, 2, 3]        # a tick per ISIN, in order
+    assert {t for _, t, *_ in seen} == {3}           # total is the asked count
+    assert seen[-1][2:] == (s.negative, s.transport_errors)  # live summary
+
+
 def test_figi_transport_error_writes_no_negative_row(db_conn, sample_export_bytes):
     _ingest(db_conn, sample_export_bytes)
     isins = [
@@ -194,12 +214,15 @@ class DictProvider:
     def symbol_for(self, company):
         return company.lei if company.lei in self.caps else None
 
-    def fetch(self, companies):
+    def fetch(self, companies, *, progress=None):
         q, f = [], []
+        addressable = sum(1 for c in companies if self.symbol_for(c) is not None)
         for c in companies:
             if c.lei in self.caps:
                 mc, ccy = self.caps[c.lei]
                 q.append(MarketCapQuote(c.lei, mc, ccy, "2026-09-08", self.name))
+                if progress and addressable:
+                    progress(len(q), addressable)
             else:
                 f.append(FetchFailure(c.lei, None, "unknown"))
         return q, f
@@ -252,11 +275,63 @@ def test_manual_provider_rejects_future_as_of(companies_built, monkeypatch, tmp_
     ).fetchone()[0] == 0
 
 
+def test_marketcaps_progress_is_labelled_with_the_provider(companies_built):
+    leis = [r["lei"] for r in companies_built.execute("SELECT lei FROM company LIMIT 2")]
+    seen: list[tuple[str, int, int]] = []
+    reference.marketcaps(
+        companies_built,
+        providers=[DictProvider("p1", {leis[0]: (1e9, "SEK")})],
+        progress=lambda name, done, total: seen.append((name, done, total)),
+    )
+    assert seen == [("p1", 1, 1)]      # provider.name bound, (done, total) forwarded
+
+
+def test_marketcaps_progress_omitted_leaves_providers_unticked(companies_built):
+    leis = [r["lei"] for r in companies_built.execute("SELECT lei FROM company LIMIT 1")]
+    s = reference.marketcaps(
+        companies_built, providers=[DictProvider("p1", {leis[0]: (1e9, "SEK")})],
+    )
+    assert s.written == 1              # no progress= is still the normal path
+
+
+def test_yahoo_ticks_only_over_companies_it_can_address(monkeypatch):
+    from insynshandel.sources.marketcap import Company
+    from insynshandel.sources.marketcap.yahoo import YahooProvider
+
+    provider = YahooProvider()
+    monkeypatch.setattr(
+        YahooProvider, "_one",
+        lambda self, c: (
+            MarketCapQuote(c.lei, 1e9, "SEK", "2026-09-08", "yahoo"), None
+        ),
+    )
+    companies = [
+        Company("L1", "One AB", None, "ONE B", None, None),      # addressable
+        Company("L2", "Two AB", None, None, None, None),         # no ticker
+        Company("L3", "Three AB", None, "THREE", None, None),    # addressable
+    ]
+    ticks: list[tuple[int, int]] = []
+    provider.fetch(companies, progress=lambda d, t: ticks.append((d, t)))
+    assert ticks == [(1, 2), (2, 2)]   # total is 2, not 3 — the meter must not stall
+
+
+def test_yahoo_progress_silent_when_nothing_is_addressable():
+    from insynshandel.sources.marketcap import Company
+    from insynshandel.sources.marketcap.yahoo import YahooProvider
+
+    ticks: list[tuple[int, int]] = []
+    YahooProvider().fetch(
+        [Company("L2", "Two AB", None, None, None, None)],
+        progress=lambda d, t: ticks.append((d, t)),
+    )
+    assert ticks == []                 # a 0/0 tick would divide by zero in the ETA
+
+
 def test_total_failure_writes_no_rows(companies_built):
     class Dead:
         name = "dead"
         def symbol_for(self, c): return c.lei
-        def fetch(self, companies):
+        def fetch(self, companies, *, progress=None):
             return [], [FetchFailure(c.lei, c.lei, "outage") for c in companies]
 
     before = companies_built.execute("SELECT COUNT(*) FROM market_cap").fetchone()[0]

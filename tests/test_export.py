@@ -40,7 +40,7 @@ class OneCapProvider:
     def symbol_for(self, c):
         return c.lei if c.lei == self.lei else None
 
-    def fetch(self, companies):
+    def fetch(self, companies, *, progress=None):
         return (
             [MarketCapQuote(self.lei, self.cap, self.ccy, "2026-09-08", self.name)],
             [],

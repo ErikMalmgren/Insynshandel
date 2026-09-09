@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -73,6 +74,12 @@ class FigiSummary:
     transport_errors: int = 0
 
 
+# (done, total, live summary) — fired after every ISIN, transport errors included.
+# OpenFIGI is one request per ISIN at 2.4 s spacing unauthenticated, so a full run
+# is ~an hour; the CLI passes a printer so the terminal is not silent (§7.1.1).
+FigiProgress = Callable[[int, int, FigiSummary], None]
+
+
 def _isins_to_resolve(conn: sqlite3.Connection) -> list[str]:
     return [
         r["isin"] for r in conn.execute(
@@ -90,7 +97,7 @@ def _isins_to_resolve(conn: sqlite3.Connection) -> list[str]:
 
 def figi(
     conn: sqlite3.Connection, client: openfigi.OpenFIGIClient | None = None,
-    *, limit: int | None = None,
+    *, limit: int | None = None, progress: FigiProgress | None = None,
 ) -> FigiSummary:
     client = client or openfigi.OpenFIGIClient()
     isins = _isins_to_resolve(conn)
@@ -98,7 +105,7 @@ def figi(
         isins = isins[:limit]
     s = FigiSummary(asked=len(isins))
     now = config.now_local_iso()
-    for isin in isins:
+    for done, isin in enumerate(isins, start=1):
         try:
             res = client.map_isin(isin)
         except Exception as exc:  # noqa: BLE001 — transport failure: do NOT cache
@@ -107,6 +114,8 @@ def figi(
                 "UPDATE figi_lookup SET last_error = ?, attempts = attempts + 1 "
                 "WHERE isin = ?", (str(exc)[:200], isin),
             )
+            if progress:
+                progress(done, s.asked, s)
             continue
         with immediate(conn):
             conn.execute(
@@ -124,6 +133,8 @@ def figi(
             s.resolved += 1
         else:
             s.negative += 1
+        if progress:
+            progress(done, s.asked, s)
     return s
 
 
@@ -219,6 +230,11 @@ class MarketCapSummary:
     degraded: list[str] = field(default_factory=list)
 
 
+# (provider name, done, total) — the provider ticks over its addressable
+# companies; the CLI rotates one meter per provider.
+MarketCapProgress = Callable[[str, int, int], None]
+
+
 def _companies(conn: sqlite3.Connection) -> list[Company]:
     return [
         Company(r["lei"], r["display_name"], r["primary_isin"], r["raw_ticker"],
@@ -231,7 +247,8 @@ def _companies(conn: sqlite3.Connection) -> list[Company]:
 
 
 def marketcaps(
-    conn: sqlite3.Connection, *, providers: list | None = None, standalone: bool = False
+    conn: sqlite3.Connection, *, providers: list | None = None, standalone: bool = False,
+    progress: MarketCapProgress | None = None,
 ) -> MarketCapSummary:
     from .fx import FxTable
 
@@ -246,7 +263,11 @@ def marketcaps(
         if not remaining:
             break
         batch = list(remaining.values())
-        quotes, failures = provider.fetch(batch)
+        tick = (
+            (lambda done, total: progress(provider.name, done, total))
+            if progress else None
+        )
+        quotes, failures = provider.fetch(batch, progress=tick)
         s.by_provider[provider.name] = len(quotes)
         s.failures += len(failures)
         # denominator = companies this provider CAN address, not every unpriced one

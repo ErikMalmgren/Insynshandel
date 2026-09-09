@@ -7,6 +7,7 @@ interface. A provider's `fetch()` **never raises**; partial success is normal
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -41,6 +42,13 @@ class FetchFailure:
     reason: str
 
 
+# (done, total) over the companies this provider can actually address — never
+# over every company: most of `company` has no symbol for a given provider, so a
+# total of len(companies) would jump to ~75% instantly and then crawl. Not called
+# at all when nothing is addressable (0/0 has no ETA).
+FetchProgress = Callable[[int, int], None]
+
+
 @runtime_checkable
 class MarketCapProvider(Protocol):
     name: str
@@ -48,7 +56,7 @@ class MarketCapProvider(Protocol):
     def symbol_for(self, company: Company) -> str | None: ...
 
     def fetch(
-        self, companies: list[Company]
+        self, companies: list[Company], *, progress: FetchProgress | None = None
     ) -> tuple[list[MarketCapQuote], list[FetchFailure]]: ...
 
 
