@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>Insynshandel — insider trading at Swedish listed companies</title>
+<meta name="description" content="Net insider buying and selling per company, from Finansinspektionen's insider register. Aggregated on LEI, converted to SEK at the transaction-date rate.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
+<link rel="canonical" href="https://insyn.malmgren.dev/">
+<link rel="stylesheet" href="/css/insyn.css?v=1">
+<script type="module" src="/js/leaderboard.js?v=1"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap-wide">
+<main id="main">
+
+<h1 class="cmd"><span class="prompt" aria-hidden="true">erik@insyn:~$</span> insyn leaderboard</h1>
+
+<p class="lede prose">Net insider trading per company, from Finansinspektionen's
+<a href="https://marknadssok.fi.se/" rel="noopener">insynsregister</a>. Only acquisitions
+and disposals are counted; every value is converted to SEK at the transaction-date
+Riksbank rate. <a href="/about.html">What the numbers mean</a>.</p>
+
+<div class="controls">
+    <div class="tabs" id="tabs" role="group" aria-label="Period"></div>
+    <div class="filter">
+        <label for="filter">filter</label>
+        <input type="search" id="filter" name="filter" autocomplete="off"
+               placeholder="company or ticker" spellcheck="false">
+    </div>
+</div>
+
+<p class="status" id="status" role="status" data-state="loading">Loading the 30d board…</p>
+
+<div class="scroller">
+<table>
+    <caption id="board-caption"></caption>
+    <thead><tr id="board-head"></tr></thead>
+    <tbody id="board-body"></tbody>
+</table>
+</div>
+
+<p class="prose muted">Sorted by net value, largest first — which ranks the largest
+companies first, because they are larger. <strong>% of mcap</strong> is the more
+informative column, and it is empty for most issuers: only about a fifth have a market
+cap on file. A negative net is a company whose insiders were net sellers.</p>
+
+<p data-static-prompt><span class="prompt" aria-hidden="true">erik@insyn:~$</span> <span class="cursor" aria-hidden="true">█</span></p>
+
+</main>
+
+<!-- NAV: duplicated on every page. Change here == change in every .html file. -->
+<nav class="nav" aria-label="Main">
+<a href="/" aria-current="page">leaderboard</a> <a href="/company.html">company</a> <a href="/about.html">about</a> <a href="https://www.malmgren.dev/">malmgren.dev</a>
+</nav>
+
+</div>
+</body>
+</html>

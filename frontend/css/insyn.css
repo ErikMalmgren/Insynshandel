@@ -1,0 +1,615 @@
+/* insyn.css — the design system for insyn.malmgren.dev
+ *
+ * The token block and the base rules below are a COPY of
+ * malmgren.dev/css/terminal.css, taken 2026-09-09. A copy, not a share
+ * (§16.4): there is no build step here and no submodule, and two small repos
+ * drifting slightly is cheaper than coupling them. If you change a colour
+ * here, nothing over there changes — that is the deal.
+ *
+ * Everything under "app" is new: this site is a data explorer, and an
+ * eleven-column table has needs a CV page does not.
+ *
+ * All colour lives in :root. Nothing below :root hardcodes a colour.
+ */
+
+:root {
+    --bg:           #0d1117;
+    --fg:           #c9d1d9;
+    --prompt:       #7ee787;
+    --muted:        #8b949e;
+    --link:         #79c0ff;
+    --link-visited: #d2a8ff;
+    --rule:         #21262d;
+    --focus:        #f0883e;
+    --err:          #ff7b72;
+
+    /* Row hover. Its own token rather than reusing --rule: text on --rule
+     * drops to ~3.6:1 in light mode, and a hovered row is still a row you
+     * have to read. Every foreground stays above 4.5:1 on this one. */
+    --hover:        #161b22;
+
+    --col:      72ch;
+    --step:     1.6rem;
+
+    /* The table's own measure. --col is a measure for prose and eleven
+     * columns do not fit in 96ch; rather than bend the column rules that make
+     * about.html readable, the board gets a container of its own (§16.4).
+     *
+     * 128ch is measured, not chosen: it is what the eleven columns need at
+     * 0.75ch of cell padding, so nothing is clipped on a 1280px display. The
+     * .scroller behind it is what makes a narrower one work. */
+    --board:    128ch;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg:           #ffffff;
+        --fg:           #1f2328;
+        --prompt:       #1a7f37;
+        --muted:        #59636e;
+        --link:         #0969da;
+        --link-visited: #8250df;
+        --rule:         #d1d9e0;
+        --focus:        #bc4c00;
+        --err:          #cf222e;
+        --hover:        #f6f8fa;
+    }
+}
+
+/* ---------- viewport scale ----------
+ *
+ * Copied wholesale. `ch` scales with font-size, so --col and the root size
+ * compound; --board rides the same scale for free.
+ *
+ * `rem` in a media query always resolves against the initial 16px root, so
+ * these breakpoints are unaffected by the font-size they themselves set.
+ */
+
+@media (min-width: 80rem) {          /* >= 1280px */
+    :root {
+        --col: 80ch;
+    }
+}
+
+@media (min-width: 100rem) {         /* >= 1600px */
+    :root {
+        --col: 88ch;
+    }
+
+    html {
+        font-size: 106.25%;          /* 17px */
+    }
+}
+
+@media (min-width: 120rem) {         /* >= 1920px */
+    :root {
+        --col: 96ch;
+    }
+
+    html {
+        font-size: 112.5%;           /* 18px */
+    }
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    scrollbar-gutter: stable;
+}
+
+body {
+    margin: 0;
+    padding: var(--step) 1.25rem 4rem;
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    font-size: 1rem;
+    line-height: 1.6;
+    text-size-adjust: 100%;
+}
+
+.wrap {
+    max-width: var(--col);
+    margin: 0 auto;
+}
+
+/* The leaderboard's container. Wider than the prose measure, and the only
+ * place --board is used. */
+.wrap-wide {
+    max-width: var(--board);
+    margin: 0 auto;
+}
+
+/* Prose inside a wide container still wants the prose measure. The board is
+ * the only thing that earns 120ch. */
+.prose {
+    max-width: var(--col);
+}
+
+/* ---------- links ---------- */
+
+a {
+    color: var(--link);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+a:visited {
+    color: var(--link-visited);
+}
+
+a:hover {
+    text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.skip {
+    position: absolute;
+    left: -9999px;
+}
+
+.skip:focus {
+    position: static;
+    display: inline-block;
+    margin-bottom: var(--step);
+}
+
+/* ---------- prompt headings ----------
+ *
+ * The prompt is a real <span aria-hidden="true"> rather than a CSS ::before,
+ * because screen readers announce generated content and "erik at insyn tilde
+ * dollar" before every heading is unusable. The heading's accessible name is
+ * just the command.
+ */
+
+.cmd {
+    margin: calc(var(--step) * 1.75) 0 var(--step);
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+h1.cmd {
+    margin-top: 0;
+}
+
+.prompt {
+    color: var(--prompt);
+    user-select: none;
+}
+
+.section-head {
+    margin: calc(var(--step) * 1.75) 0 var(--step);
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--rule);
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--prompt);
+}
+
+/* ---------- content ---------- */
+
+p,
+ul,
+ol,
+dl {
+    margin: 0 0 var(--step);
+}
+
+ul,
+ol {
+    padding-left: 2ch;
+}
+
+li {
+    margin-bottom: 0.4rem;
+}
+
+.lede {
+    font-size: 1.0625rem;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+strong {
+    color: var(--fg);
+    font-weight: 700;
+}
+
+hr {
+    margin: calc(var(--step) * 1.5) 0;
+    border: 0;
+    border-top: 1px solid var(--rule);
+}
+
+code {
+    font: inherit;
+    color: var(--prompt);
+}
+
+.kv {
+    display: grid;
+    grid-template-columns: 18ch 1fr;
+    gap: 0.4rem 1ch;
+}
+
+.kv dt {
+    color: var(--muted);
+}
+
+.kv dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 30rem) {
+    .kv {
+        grid-template-columns: 1fr;
+        gap: 0 0;
+    }
+
+    .kv dd {
+        margin-bottom: 0.6rem;
+    }
+}
+
+.entry {
+    margin-bottom: calc(var(--step) * 1.5);
+}
+
+.entry h2,
+.entry h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.entry .meta {
+    margin: 0 0 0.5rem;
+    color: var(--muted);
+}
+
+.entry p:last-child {
+    margin-bottom: 0;
+}
+
+/* Static block cursor. No animation on this site either, by design. */
+.cursor {
+    color: var(--prompt);
+    user-select: none;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* ---------- navigation ---------- */
+
+.nav {
+    margin-top: calc(var(--step) * 2);
+    padding-top: var(--step);
+    border-top: 1px solid var(--rule);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
+}
+
+.nav a {
+    text-decoration: none;
+}
+
+.nav a::before {
+    content: "[";
+    color: var(--muted);
+}
+
+.nav a::after {
+    content: "]";
+    color: var(--muted);
+}
+
+.nav a:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.nav a[aria-current="page"] {
+    color: var(--prompt);
+}
+
+/* ═══════════════ app ═══════════════
+ *
+ * Everything below is new for insyn. Nothing above this line differs from
+ * terminal.css except --board, .wrap-wide and the .kv column width.
+ */
+
+/* ---------- status lines ----------
+ *
+ * Every page starts in a loading state and every fetch can fail. A blank page
+ * is the failure mode to avoid (acceptance check: `?lei=nonsense` shows a
+ * readable error), so the status line is markup the page ships with, not
+ * something JavaScript has to invent.
+ */
+
+.status {
+    color: var(--muted);
+}
+
+.status[data-state="error"] {
+    color: var(--err);
+}
+
+.status[data-state="ready"] {
+    display: none;
+}
+
+/* ---------- controls ---------- */
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--step) 3ch;
+    margin-bottom: var(--step);
+}
+
+/* Period tabs. Real buttons — they change what the page shows without
+ * navigating, which is what a button is for. */
+.tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
+}
+
+.tabs button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--link);
+    font: inherit;
+    cursor: pointer;
+}
+
+.tabs button::before {
+    content: "[";
+    color: var(--muted);
+}
+
+.tabs button::after {
+    content: "]";
+    color: var(--muted);
+}
+
+.tabs button:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.tabs button[aria-pressed="true"] {
+    color: var(--prompt);
+}
+
+.filter label {
+    color: var(--muted);
+}
+
+.filter input {
+    padding: 0.15rem 0.5ch;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    caret-color: var(--prompt);
+    min-width: 24ch;
+}
+
+@media (pointer: coarse) {
+    .filter input {
+        min-height: 2.75rem;
+    }
+}
+
+/* ---------- the board ----------
+ *
+ * The table gets its own scroll container so a wide table never makes the
+ * *page* scroll sideways (acceptance check: zoom to 200%, no horizontal page
+ * scroll outside the table's own container).
+ */
+
+.scroller {
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    white-space: nowrap;
+}
+
+caption {
+    text-align: left;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+}
+
+th,
+td {
+    padding: 0.25rem 0.75ch;
+    text-align: left;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: baseline;
+}
+
+thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--bg);
+    border-bottom: 1px solid var(--rule);
+    font-weight: 700;
+    color: var(--prompt);
+}
+
+/* The name column stays put while the rest scrolls, so a row never loses its
+ * label. It needs an opaque background or the cells slide under it. */
+.col-name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background-color: var(--bg);
+    white-space: normal;
+    min-width: 24ch;
+}
+
+thead .col-name {
+    z-index: 3;
+}
+
+tbody tr:hover td {
+    background-color: var(--hover);
+}
+
+/* The sticky name cell paints its own background, so it needs the hover
+ * colour too or the hovered row looks like it stops at the second column. */
+tbody tr:hover .col-name {
+    background-color: var(--hover);
+}
+
+/* Sortable headers are a <button> inside a <th scope="col">, with aria-sort on
+ * the th — not a click handler on a bare th. */
+th button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+th button:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+/* The arrow is decoration; aria-sort on the th carries the meaning. */
+th[aria-sort="ascending"] button::after {
+    content: " \2191";
+}
+
+th[aria-sort="descending"] button::after {
+    content: " \2193";
+}
+
+.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* A sell. Coloured AND signed — never colour alone (§16.5). */
+.neg {
+    color: var(--err);
+}
+
+/* Missing market cap. It is the common case, not the edge case: only ~20% of
+ * issuers have one, so this has to look deliberate rather than broken. */
+.dash {
+    color: var(--muted);
+}
+
+.tag-unverifiable {
+    color: var(--muted);
+}
+
+/* Below this width the four secondary money/people columns come off; the rest
+ * still scrolls inside .scroller. */
+@media (max-width: 46rem) {
+    .opt {
+        display: none;
+    }
+}
+
+/* ---------- company page ---------- */
+
+/* A name variant and a picker row both end in a 20-character LEI, which has
+ * no break opportunity of its own and pushes the page sideways on a phone. */
+.variants li,
+.index-list li {
+    overflow-wrap: anywhere;
+}
+
+.tx-note {
+    color: var(--muted);
+}
+
+/* An excluded transaction is shown, greyed, with its reason — no row is ever
+ * dropped from the list without saying why (invariant 8). */
+tr[data-counted="0"] td {
+    color: var(--muted);
+}
+
+/* ---------- about page ---------- */
+
+/* Rendered loudly on purpose: an empty unmapped_natures is the normal state
+ * (invariant 7), so a non-empty one must not look like ordinary content. */
+.alarm {
+    border-left: 2px solid var(--err);
+    padding-left: 1ch;
+    color: var(--err);
+}
+
+.alarm h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+/* ---------- print ---------- */
+
+@media print {
+    :root {
+        --bg: #ffffff;
+        --fg: #000000;
+        --muted: #444444;
+        --prompt: #000000;
+        --link: #000000;
+        --link-visited: #000000;
+        --rule: #999999;
+        --err: #000000;
+        --hover: #ffffff;
+    }
+
+    body {
+        padding: 0;
+        font-size: 11pt;
+    }
+
+    .nav,
+    .skip,
+    .cursor,
+    .controls {
+        display: none;
+    }
+
+    .scroller {
+        overflow-x: visible;
+    }
+}

@@ -572,3 +572,40 @@ but do not build alternative implementations speculatively.
   snapshot and no company has newly become `unverifiable`.
 - `insyn build` **completes** when a provider is degraded; only standalone
   `insyn refdata marketcaps` exits non-zero (§7.4.3).
+
+---
+
+### 7.5 What the reference-data runs actually returned (2026-09-09)
+
+Recorded here so a later session does not re-run something that is finished.
+
+**`refdata fx --backfill` — done.** All 8 currencies in ~3 minutes: 2561–2562
+rows each, except RUB at 1445 — the SWEA series stops in 2022. `aggregate` and
+`export-static` were re-run after it. `doctor` reports 0 rows excluded for a
+missing FX rate.
+
+**`refdata figi` — done, and this is the surprising one.** All **5876** distinct
+ISINs in `transaction_norm` have a `figi_lookup` row: 0 never asked, 0 with an
+error, **654 resolved** to a ticker (11%). Those 654 give 534 of 2049 companies
+a `raw_ticker`, all `ticker_source = 'openfigi'`.
+
+> ⚠ **The 5222 NULL-ticker rows are frozen for 90 days.** §7.1.1's retry rule is
+> `ticker IS NULL AND attempts < 5 AND looked_up_at < date('now','-90 days')`,
+> so re-running `refdata figi` — with an API key or without — asks for none of
+> them again until roughly **2026-12-08**. That matters because the first pass
+> ran ~13 h unauthenticated before being restarted with a key, and the two days
+> did not resolve at the same rate: 2026-09-08 got 439/3013 (14.6%), 2026-09-09
+> got 215/2863 (7.5%). That gap is weak evidence the runs were not equivalent.
+> If the unauthenticated leg is judged untrustworthy, the fix is to clear those
+> rows by hand (`DELETE FROM figi_lookup WHERE ticker IS NULL AND
+> looked_up_at < '2026-09-09'`) and re-run — not to re-run and expect a change.
+>
+> A low resolve rate is also the *expected* outcome for much of this set: most
+> distinct ISINs here are warrants, subscription rights, BTAs and bonds, which
+> have no exchange ticker to return. Do not treat 11% as prima facie broken.
+
+**`refdata marketcaps` — partially done.** 419 caps for one snapshot date
+(2026-09-09) over the 534 addressable companies, so **115 are missing**.
+Snapshots are dated and append-only (§7.4.3), so a re-run only adds rows.
+`doctor`'s outlier and `pct_of_mcap` checks run on real data rather than
+SKIPping because of this run.

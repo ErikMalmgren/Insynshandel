@@ -4,6 +4,8 @@ __pycache__/
 data/insynshandel.db*
 data/cache/
 dist/
+# assembled by the deploy step: frontend/ + dist/ (§16.2). Never committed.
+site/
 .~lock.*#
 # large source data — fetched at build time, never committed
 lei-isin-*.csv

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>company — insyn.malmgren.dev</title>
+<meta name="description" content="One company's insider trading: totals per period, the names it has been filed under, and its most recent reported transactions.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
+<link rel="canonical" href="https://insyn.malmgren.dev/company.html">
+<link rel="stylesheet" href="/css/insyn.css?v=1">
+<script type="module" src="/js/company.js?v=1"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap-wide">
+<main id="main">
+
+<h1 class="cmd"><span class="prompt" aria-hidden="true">erik@insyn:~$</span> <span id="heading">cat company</span></h1>
+
+<p class="status" id="status" role="status" data-state="loading">Loading…</p>
+
+<!-- ?lei= renders here; no query renders the picker below instead. -->
+<div id="detail"></div>
+
+<div id="picker" hidden>
+    <p class="lede prose">Every issuer Finansinspektionen has filed a report against —
+    including the ones with nothing counted. Pick one to see its totals and its
+    reported transactions.</p>
+
+    <div class="controls">
+        <div class="filter">
+            <label for="company-filter">filter</label>
+            <input type="search" id="company-filter" name="q" autocomplete="off"
+                   placeholder="company or ticker" spellcheck="false">
+        </div>
+        <p class="muted" id="company-count" role="status"></p>
+    </div>
+
+    <ul class="index-list" id="company-list"></ul>
+</div>
+
+<p data-static-prompt><span class="prompt" aria-hidden="true">erik@insyn:~$</span> <span class="cursor" aria-hidden="true">█</span></p>
+
+</main>
+
+<!-- NAV: duplicated on every page. Change here == change in every .html file. -->
+<nav class="nav" aria-label="Main">
+<a href="/">leaderboard</a> <a href="/company.html" aria-current="page">company</a> <a href="/about.html">about</a> <a href="https://www.malmgren.dev/">malmgren.dev</a>
+</nav>
+
+</div>
+</body>
+</html>

@@ -239,3 +239,94 @@ frontend/
   container.
 - Light mode (`prefers-color-scheme: light`) is a full inversion with no
   unreadable pair.
+
+---
+
+### 16.9 As built (2026-09-09)
+
+The nine files of §16.8 exist under `frontend/`. No framework, no bundler, no
+`package.json`, no dependencies — as specified.
+
+**Where it deviates, and why.**
+
+- **`--board: 128ch`, not `--col`.** §16.4 forbids raising `--col`; this is the
+  table's own container, and 128ch is *measured*, not chosen: it is what the
+  eleven columns need at `0.75ch` of cell padding so nothing is clipped on a
+  1280px display. `.scroller` is what makes narrower viewports work, and
+  `.prose { max-width: var(--col) }` keeps the text at the prose measure inside
+  the wide container. ⚠ "Measured" means *on this machine*: `1ch` is ~10px in
+  DejaVu Sans Mono but ~9.6px in Menlo and ~8.9px in Consolas, and the table's
+  width is driven by its content (`white-space: nowrap` over real strings), not
+  purely by `ch`. On a narrower stack the last column will scroll rather than
+  fit — which is the designed fallback, not a regression. Do not tighten 128ch
+  further on the strength of one platform's screenshot.
+- **`prefers-reduced-motion` is satisfied vacuously.** §16.4 carries it over as
+  an invariant; nothing on this site animates or transitions, so there is no
+  block to write. The rule still applies the moment someone adds one.
+- **A `--hover` token was added** (`#161b22` dark, `#f6f8fa` light). The obvious
+  row hover — `background: var(--rule)` — drops `--muted`, `--link`, `--err` and
+  `--prompt` to 3.5–4.3:1 in *light* mode. Every foreground clears 4.5:1 on
+  `--hover`. A hovered row is still a row you have to read.
+- **`?lei=` with no value renders a company picker**, filtered on name and
+  ticker only. §16.3 says `company.html` reads `companies.json`; this is what
+  for. It is a company index, not a person index — the distinction §16.5 draws.
+- **`periods` is rendered chronologically, not as the JSON orders it.**
+  `agg_company_period` writes a row per window only when counted transactions
+  exist there, and `company_detail` sorts by `period` *alphabetically* —
+  `'365d', '90d', 'all', 'ytd'`. 272 of 2049 companies have an **empty**
+  `periods` array and 974 have only `'all'`. The page imposes
+  30d → 90d → 365d → ytd → all, lists only the windows present, and names the
+  absent ones as "no counted transactions" rather than inventing a `0` row.
+- **Narrow viewports drop four columns rather than reordering.** §16.3's "show
+  name / net / tx / % of mcap and let the rest scroll" reads two ways —
+  reordering the columns, or scrolling to the rest. Reordering was rejected: it
+  would give a phone and a desktop different column orders for the same table.
+  Below 46rem the `.opt` four (`bought`, `sold`, `buyers`, `sellers` — the ones
+  `net` and `tx` already summarise) come off, leaving name · ticker · net · tx
+  · mcap · % of mcap · verified, and `.scroller` carries the rest sideways with
+  the name column sticky at the left edge.
+- **No interactive shell.** §16.1 already said not to port `js/shell.js`; the
+  prompt headings and the static `█` are the look, and there is no input.
+
+**One rule needed splitting.** `pct_of_mcap == 0` is normal — a company that
+bought exactly as much as it sold — so the invariant-11 sentinel warning fires
+on `market_cap == 0` only. `mcapCell()` warns; `pctCell()` deliberately does
+not. Two real entries (`PY6ZZQWO2IZFZC3IOL08`, `5493006UG44TYSIXOB13`) have
+`net_value_sek == 0.0` and tripped the guard before it was split, which is how
+this was found.
+
+**How it was verified.** `site/` assembled per §16.2, served with
+`python3 -m http.server`, driven by headless chromium over CDP (an ad-hoc
+harness — **not committed**, so re-derive it or ask before trusting a claim
+below):
+
+- 29 behaviour checks — every acceptance check above that a browser can decide.
+  Console clean on all five views; sorting all 11 columns and re-selecting all
+  4 periods issue **zero** network requests after the first fetch of each;
+  `aria-sort` tracks and toggles; all 11 sort buttons keyboard-focusable;
+  `?lei=nonsense` gives a sentence, not a blank page; no market-cap or
+  `% of mcap` cell renders `0`; 151 of 251 rows render `—`.
+- No horizontal page scroll outside `.scroller` at 1920 / 1280 / **640** (= a
+  1280px window at 200% zoom) / 360px. The 360px pass found one real bug: an
+  unbreakable 20-character LEI in the picker list, fixed with
+  `overflow-wrap: anywhere`.
+- Contrast computed for every foreground/background pair used, in both schemes.
+- `npx html-validate@9` clean on all four pages.
+- **Both §9 modes checked, not just the static one.** All five URL builders in
+  `js/insyn.js` were resolved against a running `insyn serve`: `/meta`,
+  `/data-quality`, `/leaderboard?period=30d`, `/companies`,
+  `/companies/{lei}` — all 200, and the payloads are key-identical to their
+  `dist/` twins (they come from the same `reads.py`). Note the paths are *not*
+  parallel: the static tree has `company/<LEI>.json`, the API has
+  `/companies/{lei}`. That asymmetry is why the mapping is a switch in one
+  place rather than string concatenation at each call site. To use the API
+  mode, set `window.API_BASE` to an absolute URL before the module loads;
+  anything not matching `^https?://` is treated as a static tree.
+
+`uv run insyn doctor` (21 pass) and `pytest` (148 pass) are unchanged by this
+phase — nothing under `src/` was touched.
+
+**Not done, and deliberately out of scope here:** the §16.2 assemble step is
+still only shell in this file, and `ingest.yml`'s publish block (i) is still
+commented out with no `pages: write` / `id-token: write`. See
+`deploy/README.md`.

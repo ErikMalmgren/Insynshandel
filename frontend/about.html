@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>about the data — insyn.malmgren.dev</title>
+<meta name="description" content="What this dataset is, how far back it goes, which transactions are counted, how they are converted to SEK, and which rows are implausible enough to report.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
+<link rel="canonical" href="https://insyn.malmgren.dev/about.html">
+<link rel="stylesheet" href="/css/insyn.css?v=1">
+<script type="module" src="/js/about.js?v=1"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap-wide">
+<main id="main">
+
+<h1 class="cmd"><span class="prompt" aria-hidden="true">erik@insyn:~$</span> man insyn</h1>
+
+<p class="lede prose">Every transaction here is a report a person discharging managerial
+responsibilities filed with <strong>Finansinspektionen</strong>, the Swedish financial
+supervisory authority, under MAR article 19. The register is public. This site fetches it,
+converts it to one currency, and adds up what insiders bought and sold per company.</p>
+
+<p class="status" id="status" role="status" data-state="loading">Loading coverage and data quality…</p>
+
+<!-- Rendered only when unmapped_natures is non-empty, which is never in a
+     healthy build (invariant 7). -->
+<div class="alarm prose" id="alarm" hidden></div>
+
+<section>
+<h2 class="section-head">coverage</h2>
+<div id="coverage"></div>
+<p class="prose muted">The register is fetched by publication date. A missing day is a day
+that was never fetched, which means the site is quietly short of the transactions filed on
+it — so the number is shown whether or not it is zero.</p>
+</section>
+
+<section>
+<h2 class="section-head">what counts</h2>
+
+<p class="prose">Only two transaction types move the totals:</p>
+
+<dl class="kv prose">
+    <dt>Förvärv</dt>
+    <dd>an acquisition. Counts <strong>+1</strong>.</dd>
+
+    <dt>Avyttring</dt>
+    <dd>a disposal. Counts <strong>−1</strong>.</dd>
+</dl>
+
+<p class="prose">Everything else is excluded — pledges, lending, subscriptions, allotments, gifts,
+inheritances — and no row is ever dropped without a recorded reason. A company's
+transaction list shows the excluded rows too, greyed, with the reason in the last column.
+That is deliberate: a total you cannot reconcile against the rows behind it is a total you
+cannot check.</p>
+
+<p class="prose">Two exclusions are worth knowing about, because they are corrections rather than
+categories. FI sometimes writes a <em>total</em> into the price column instead of a unit
+price; unguarded, about 180 such rows carry almost all of the money on the site. And a
+report that has been amended or withdrawn is superseded rather than deleted, so only the
+current version of each report is counted.</p>
+</section>
+
+<section>
+<h2 class="section-head">money</h2>
+
+<p class="prose">Every value is <strong>SEK</strong>, converted at the Riksbank rate for the
+transaction's own date — not today's rate, and not the rate on the day the data was
+fetched. USD/SEK ranged between roughly 8 and 11 over the period covered here, so valuing a
+2016 trade at a 2026 rate would misstate it by up to a third.</p>
+
+<p class="prose">A handful of currencies have no Riksbank series at all. Rows in those are excluded and
+counted as such rather than guessed at.</p>
+
+<p class="prose">Totals are keyed on the <strong>transaction date</strong>, never the publication date.
+Publication date only decides which window gets fetched.</p>
+</section>
+
+<section>
+<h2 class="section-head">how companies are identified</h2>
+
+<p class="prose">Companies are aggregated on their <strong>LEI</strong>, not on ISIN: one company has
+many ISINs — share classes, subscription rights, historical ones — and keying on ISIN
+splits a company across the leaderboard. The displayed name is the one used most often in
+the last twelve months, because companies rename and the LEI does not.</p>
+
+<p class="prose">FI's own LEI values are not clean. Some rows carry none — that is common before 2018 and
+essentially absent after it — and those rows are excluded rather than lumped into a bucket
+of their own. Worse, some rows carry the <em>wrong</em> LEI: a single value can appear
+against hundreds of unrelated issuers, which merges them into one row here. The count of
+ISINs filed under more than one LEI is reported below as a measure of how much of this
+there is.</p>
+</section>
+
+<section>
+<h2 class="section-head">what is deliberately missing</h2>
+
+<p class="prose">There is <strong>no person index</strong>. Names appear on a company's own transaction
+list, exactly as FI publishes them, and nowhere else — there is no person page, no name
+search, and no way to sort or filter by person anywhere on this site. The register is
+public so that a company's insider trading can be scrutinised; assembling it into a
+searchable profile of an individual is a different thing, and this site does not do it.</p>
+
+<p class="prose">Market cap is missing for most issuers. It is used only to sanity-check values, so a
+company without one is marked <em>unverifiable</em> and still counted — never silently
+dropped, and never shown as a market cap of zero.</p>
+</section>
+
+<section>
+<h2 class="section-head">data quality</h2>
+<div id="quality"></div>
+</section>
+
+<section>
+<h2 class="section-head">source</h2>
+<dl class="kv prose">
+    <dt>Register</dt>
+    <dd><a href="https://marknadssok.fi.se/" rel="noopener">marknadssok.fi.se</a> — Finansinspektionen</dd>
+
+    <dt>FX rates</dt>
+    <dd>Riksbanken SWEA, per transaction date</dd>
+
+    <dt>Code</dt>
+    <dd><a href="https://github.com/ErikMalmgren/Insynshandel" rel="noopener">github.com/ErikMalmgren/Insynshandel</a></dd>
+</dl>
+<p class="prose muted">Not investment advice, and not an official publication. The authoritative
+data is Finansinspektionen's; every reported row above links back to the same search
+there.</p>
+</section>
+
+<p data-static-prompt><span class="prompt" aria-hidden="true">erik@insyn:~$</span> <span class="cursor" aria-hidden="true">█</span></p>
+
+</main>
+
+<!-- NAV: duplicated on every page. Change here == change in every .html file. -->
+<nav class="nav" aria-label="Main">
+<a href="/">leaderboard</a> <a href="/company.html">company</a> <a href="/about.html" aria-current="page">about</a> <a href="https://www.malmgren.dev/">malmgren.dev</a>
+</nav>
+
+</div>
+</body>
+</html>
