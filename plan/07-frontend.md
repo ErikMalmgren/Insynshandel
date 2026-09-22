@@ -326,7 +326,8 @@ below):
 `uv run insyn doctor` (21 pass) and `pytest` (148 pass) are unchanged by this
 phase — nothing under `src/` was touched.
 
-**Not done, and deliberately out of scope here:** the §16.2 assemble step is
-still only shell in this file, and `ingest.yml`'s publish block (i) is still
-commented out with no `pages: write` / `id-token: write`. See
-`deploy/README.md`.
+**Publishing (wired 2026-09-22, after this phase):** the §16.2 assemble lines
+are the "Assemble site" step in `ingest.yml`, followed by
+`upload-pages-artifact` (`path: site/`) and a separate `deploy` job
+(`deploy-pages`, `environment: github-pages`). Pages enablement and DNS are
+manual; `deploy/README.md` has the order.

@@ -1,19 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # §10.1 — the static-only deployment path (free: no server, no VPS).
 #
-#   ⚠ TEMPLATE — NOT YET RUNNABLE. This workflow assumes infrastructure that
-#   does not exist until you have run the first backfill by hand:
+#   Job `ingest`: restore the DB from the rolling `db-latest` release → fetch →
+#   build → export → doctor → re-upload the DB → assemble `site/` (§16.2).
+#   Job `deploy`: publish `site/` to this repo's Pages (insyn.malmgren.dev).
 #
-#     • a rolling GitHub Release tagged `db-latest` holding `insynshandel.db`
-#       as an asset (created by the first `gh release create` / upload below —
-#       the restore step is guarded to migrate-from-empty when it is absent);
-#     • a target for the exported JSON — either this repo's Pages, or a
-#       separate frontend repo that reads the files under `./data/` (§9,
-#       `API_BASE = './data'`). Wire ONE of the two "publish" blocks at the end.
-#     • repo secrets: `PAGES_DEPLOY_TOKEN` (only if publishing to a separate
-#       repo) and optionally `OPENFIGI_API_KEY`.
-#
-#   Until then it is documentation of the intended cadence, not CI that runs.
+#   Needs Settings → Pages → Source: "GitHub Actions". The custom domain is
+#   set there too — with an Actions deploy, `frontend/CNAME` is ignored.
+#   Optional secret: `OPENFIGI_API_KEY`.
 # ─────────────────────────────────────────────────────────────────────────────
 name: ingest
 
@@ -30,12 +24,13 @@ concurrency:
   group: ingest
   cancel-in-progress: false
 
-permissions:
-  contents: write                # gh release upload/download on this repo
+permissions: {}                  # granted per job below
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write            # gh release upload/download on this repo
     env:
       GH_TOKEN: ${{ github.token }}
       OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
@@ -98,25 +93,29 @@ jobs:
             || gh release create db-latest --title "Latest database snapshot" --notes "Rolling. Updated by the ingest workflow."
           gh release upload db-latest data/insynshandel.db --clobber
 
-      # 6b. Publish dist/ — WIRE ONE OF THESE.
-      #
-      # (i) This repo's Pages (Settings → Pages → Source: GitHub Actions).
-      #     Add `pages: write` and `id-token: write` to `permissions` above.
-      #
-      # - uses: actions/upload-pages-artifact@v3
-      #   with: { path: dist/ }
-      # - uses: actions/deploy-pages@v4
-      #
-      # (ii) A separate frontend repo that serves the JSON under ./data/:
-      #
-      # - name: Publish to the frontend repo
-      #   run: |
-      #     git clone --depth 1 "https://x:${{ secrets.PAGES_DEPLOY_TOKEN }}@github.com/ErikMalmgren/<frontend-repo>.git" site
-      #     rm -rf site/data && mkdir -p site/data
-      #     cp -r dist/* site/data/
-      #     cd site
-      #     git config user.name  "insyn-bot"
-      #     git config user.email "bot@users.noreply.github.com"
-      #     git add data
-      #     git commit -m "data: $(date -u +%FT%TZ)" || { echo "no change"; exit 0; }
-      #     git push
+      # 6b. Assemble the site (§16.2): frontend at the root, JSON under data/
+      #     (`API_BASE = './data'`, §9). Never export into frontend/ or copy the
+      #     frontend into dist/ — export_static rmtree's its --out directory.
+      - name: Assemble site
+        run: |
+          mkdir -p site/data
+          cp -r frontend/. site/
+          cp -r dist/.     site/data/
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/
+
+  # 7. Publish. Runs only when every ingest step passed — doctor included.
+  deploy:
+    needs: ingest
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -21,6 +21,7 @@ loading. **Read the one file for the phase you are on — not the whole plan.**
 | 5 · reference data | `plan/05-refdata.md` | with phase 3 |
 | 6 · static JSON export | `plan/06-static.md` | 5th |
 | 4 · API | `plan/04-api.md` | 6th |
+| 7 · frontend (`insyn.malmgren.dev`) | `plan/07-frontend.md` | 7th |
 | — deployment | `plan/deploy.md` | last |
 | — testing, `insyn doctor` | `plan/testing.md` | throughout |
 | — rationale, rejected options | `plan/background.md` | read once |
@@ -119,7 +120,7 @@ keeps working while the data goes wrong.
   normalize→refdata→aggregate. Read surface: `api/reads.py` (+ `api/schemas.py`
   Pydantic) is the **shared layer** — `export_static.py` and the FastAPI routes
   (`api/app.py`, `api/routes.py`, `insyn serve`) call the same functions;
-  `tests/test_api.py` diffs every route against its `dist/` file. 129 hermetic
+  `tests/test_api.py` diffs every route against its `dist/` file. 148 hermetic
   tests.
 - **Phase 4 deviations from the plan header** (deliberate, also in the commit):
   `/leaderboard` is `?period=` not `?from=&to=` (arbitrary windows have no
@@ -127,40 +128,87 @@ keeps working while the data goes wrong.
   (§8.2); the global `/transactions` feed omits `pdmr`/`position` (that §8.1
   grant is company-scoped). Query params are `extra="forbid"` models, so an
   unknown/off-list param is a 422, not a silent ignore.
-- **Deployment artifacts written, nothing deployed** (`plan/deploy.md`):
-  `Dockerfile` (+`.dockerignore`), `docker-compose.yml`, `.env.example`,
-  `deploy/` (Caddyfile, systemd unit+timer, `ingest.sh`, runbook),
-  `.github/workflows/` — `ci.yml` (beyond the plan) and `ingest.yml`
-  (⚠ template: needs the post-backfill `db-latest` release asset + one publish
-  block wired). Docker uses `INSYN_DATA_DIR=/data`, **not** the plan sketch's
-  `INSYN_DB`. Docker build **unverified** (no docker in this env). See
-  [`deploy/README.md`](deploy/README.md).
-- **Next: nothing left in the plan** — only the post-backfill follow-ups below.
-- **Not run yet:**
-  - `insyn ingest backfill` (~330 req / 30-45 min) — the user runs it
-    **overnight after the final phase**; remind them, don't start it. Resumable.
-  - `refdata figi` / `marketcaps` (yfinance, can hang) — built + unit-tested,
-    run at scale post-backfill. `build --no-figi --no-marketcaps` skips them.
-    FX backfill (4 req) is already done on the working DB.
-  - §11.3 parity vs `python script.py` — last gate before deleting the 4 legacy
-    root scripts (their inputs are in `data/cache/legacy/`).
+- **Deployment** (`plan/deploy.md`): `Dockerfile` (+`.dockerignore`),
+  `docker-compose.yml`, `.env.example`, `deploy/` (Caddyfile, systemd
+  unit+timer, `ingest.sh`, runbook), `.github/workflows/` — `ci.yml` (beyond
+  the plan) and `ingest.yml`. **`ingest.yml` runs on its cron and succeeds**
+  (~10 min; restores + re-uploads the `db-latest` release asset), so the
+  *cloud* DB is current even when the local one is stale — a local doctor
+  "N missing days" FAIL is just an idle laptop. Its `deploy` job publishes
+  `site/` (§16.2) to Pages → `insyn.malmgren.dev` (2026-09-22; live once Pages
+  + Cloudflare DNS are set up by hand — `deploy/README.md`). Docker uses
+  `INSYN_DATA_DIR=/data`, **not** the plan sketch's `INSYN_DB`. Docker build
+  **unverified** (no docker in this env); the API path is not deployed.
+- **Phase 7 frontend built** (2026-09-09, `frontend/`) — the nine files of
+  §16.8, no deps. As-built notes + how it was verified: `plan/07-frontend.md`
+  §16.9.
+- **Next: nothing left in the plan** — only the follow-ups below.
+- **`insyn ingest backfill` is DONE** (2026-09-09): 167,477 live rows,
+  2016-07-04..2026-09-08, 3722 coverage days — inside doctor's 160k-200k band.
+- **Follow-ups, worst first** (2026-09-09):
+  1. **LEI collisions** — the only one that makes the site *wrong* rather than
+     incomplete (see the two gotchas below). `issuer_alias` is wired but
+     **empty**, and keyed `alias_lei`→`canonical_lei` it can only fold many
+     LEIs into one — it cannot split one bad LEI across 253 issuers or recover
+     a blank one from a name. Needs an `issuer_name`-keyed table + a join
+     change: schema work, not a seed-file edit. ⚠ box in
+     `plan/03-aggregate.md` §6.5.
+  2. §11.3 parity vs `python script.py`, then delete the 4 legacy root scripts
+     (inputs in `data/cache/legacy/`). Runnable now.
+  3. `refdata marketcaps` — 419 caps over 534 addressable, so 115 missing.
+     Snapshots are dated + append-only, so a re-run is cheap.
+  4. ~~Wire the frontend deploy~~ — workflow side done 2026-09-22; the Pages +
+     DNS clicks are the user's (checklist in `deploy/README.md`).
+  - ~~`refdata figi`~~ / ~~`refdata fx --backfill`~~ **both done** — see
+    `plan/05-refdata.md` §7.5 for what they returned and the ⚠ 90-day retry
+    freeze on figi's 5222 NULL tickers.
 - Gotchas:
   - **Invariants 9 & 12 overstate LEI coverage** (`2016-07` 79% no-LEI, modern
     0%). `aggregate` excludes blank-`lei` rows as `exclude_reason='no_lei'`
     (filter rule 0). Post-backfill follow-up: `issuer_name→lei` seed map +
     re-aggregate (⚠ box in `plan/03-aggregate.md` §6.5).
+  - **A wrong LEI is worse than a blank one, and FI ships plenty.**
+    `549300O897ZC5H7CY412` is on 992 `raw_live` rows across **253 unrelated
+    issuers** (Tobii, Mekonomen, Kjell Group, Hifab …), each with its own
+    correct ISIN; 594 LEIs carry >5 distinct `emittent` names, and Tobii alone
+    has 4 LEI values. Verbatim from FI, not a normalize bug — but invariant 12
+    keys on `lei`, so those 253 collapse into one leaderboard row. Same
+    follow-up as above: the seed map has to *override* bad LEIs, not only fill
+    blanks. (Unrelated to the 218 outliers — checked, 87% vs an 81% baseline.)
   - Invariant 10 (`.strip()`) is phase 2+ only (phase 1 stores verbatim —
     stripping changes `row_hash`).
+  - **`implausible_unit_price` (§6.2.1) is what keeps the leaderboard sane.**
+    FI writes a total into `Pris` on ~181 rows; unguarded they carried 99.99%
+    of the counted SEK total. It needs no market cap, which matters because
+    only ~20% of issuers have one — the outlier rule protects nobody else.
+    Two arms (equity unit price > 10k SEK; `volume == price` above 1 bn), both
+    required. `EQUITY_INSTRUMENT_TYPES` is a hand-derived list: a type FI adds
+    later is never flagged until someone adds it.
+  - Two FX exclude reasons, and the split is load-bearing: `no_fx_series`
+    (currency in `config.FX_NO_SERIES` — no SWEA series exists) is tolerated by
+    `doctor`; `no_fx_rate` (just not fetched) is a hard failure. A currency in
+    neither tuple falls to `no_fx_rate` **on purpose**, so a new one surfaces.
   - `raw_live` / `market_cap_current` are `SELECT`-based views — a migration
     altering `raw_transaction` must `DROP`+recreate `raw_live`.
   - §4.6's `2026-03-01..07` count drifts down as FI withdraws reports; `doctor`
     splits FROZEN (exact) / RECENT (`<=`).
+  - A **negative `pct_of_mcap` is normal** (net seller) — the §9 guard that
+    flagged it was dropped 2026-09-09. What remains is `market_cap == 0`, which
+    can only mean a query bypassed `market_cap_current` (inv 11). The sentinel
+    is live: `marketcaps` writes `max(mc_sek, 0.0)` when FX lookup fails.
+  - `refdata fx`/`figi`/`marketcaps` print a stderr progress meter (`_Progress`
+    in `cli.py`); `--quiet` silences it, and piping through `tail` swallows it.
+    yfinance's own chatter scrolls it away.
   - `data/cache/legacy/` is gitignored & absent from a fresh clone.
   - `ticker_override.csv`: `symbol='?'` = worklist (loader skips); `provider`
     PK is `''` not `NULL`.
   - `.strip()` from `data/seed/*.csv` comment lines (`#`) — `load_seeds` skips them.
   - Bash tool runs zsh; `uv` at `~/.local/bin/uv`; zsh aborts a command on a
-    non-matching glob (use `find … -delete`, not `rm glob*`).
+    non-matching glob (use `find … -delete`, not `rm glob*`). An **unquoted**
+    heredoc delimiter expands `$…` and backticks inside — always `<<'EOF'`.
+  - **`pct_of_mcap == 0` is normal** (bought exactly as much as sold) — the
+    invariant-11 sentinel is about `market_cap == 0` only. `mcapCell` warns,
+    `pctCell` deliberately does not. 151 of 251 leaderboard rows show `—`.
 
 ## Commands
 
