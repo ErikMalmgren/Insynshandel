@@ -1,4 +1,4 @@
-"""FxTable — forward-filled Riksbank lookup (§6.3.1)."""
+"""FxTable — forward-filled Riksbank lookup."""
 
 from __future__ import annotations
 

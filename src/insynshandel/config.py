@@ -16,19 +16,19 @@ REPO_ROOT = PACKAGE_DIR.parent.parent
 MIGRATIONS_DIR = PACKAGE_DIR / "migrations"
 SEED_DIR = REPO_ROOT / "data" / "seed"
 
-# The DB must live on local disk — SQLite WAL corrupts on NFS/SMB (CLAUDE.md #17).
+# The DB must live on local disk — SQLite WAL corrupts on NFS/SMB.
 DATA_DIR = Path(os.environ.get("INSYN_DATA_DIR", REPO_ROOT / "data"))
 DB_PATH = Path(os.environ.get("INSYN_DB_PATH", DATA_DIR / "insynshandel.db"))
 
-# ── FI export source (plan/01-ingest.md §4.1) ────────────────────────────────
+# ── FI export source ─────────────────────────────────────────────────────────
 FI_SEARCH_URL = "https://marknadssok.fi.se/Publiceringsklient/sv-SE/Search/Search"
 FI_ENCODING = "utf-16-le"          # no BOM — never "utf-16"
 FI_DELIMITER = ";"
-FI_FIELD_COUNT = 23                # 22 real columns + trailing empty (§4.1.1)
-FI_ROW_CAP = 1000                  # hard, per query (§4.2)
+FI_FIELD_COUNT = 23                # 22 real columns + trailing empty
+FI_ROW_CAP = 1000                  # hard, per query
 FI_EARLIEST = "2016-07-01"         # MAR entry into force; earlier queries return 0
 
-# ── Time (§13.10) ───────────────────────────────────────────────────────────
+# ── Time ────────────────────────────────────────────────────────────────────
 # All FI timestamps are Europe/Stockholm local, no offset. "Today", for choosing
 # which publication-date windows to fetch, means today *there*.
 FI_TZ = zoneinfo.ZoneInfo("Europe/Stockholm")
@@ -43,7 +43,7 @@ def now_local_iso() -> str:
     return datetime.now(FI_TZ).isoformat(timespec="seconds")
 
 
-# ── Politeness (CLAUDE.md, §13.6) ────────────────────────────────────────────
+# ── Politeness toward FI ─────────────────────────────────────────────────────
 REQUEST_SPACING_S = float(os.environ.get("INSYN_REQUEST_SPACING_S", "3.0"))
 REQUEST_TIMEOUT_S = float(os.environ.get("INSYN_REQUEST_TIMEOUT_S", "60"))
 MAX_REQUESTS_PER_RUN = int(os.environ.get("INSYN_MAX_REQUESTS_PER_RUN", "600"))
@@ -53,15 +53,15 @@ USER_AGENT = os.environ.get(
     "Insynshandel/0.1 (+https://github.com/erikm/Insynshandel; e.malmis@gmail.com)",
 )
 
-# ── Windowing (§4.2.1) ──────────────────────────────────────────────────────
+# ── Windowing ───────────────────────────────────────────────────────────────
 SEED_WINDOW_DAYS = 14             # 7-day seeds never cap but cost ~2x requests
 BISECT_FLOOR_DAYS = 1            # a single day still capped => data loss, flagged
 
-# ── Incremental cadence (§4.3, §10.3) ───────────────────────────────────────
+# ── Incremental cadence ─────────────────────────────────────────────────────
 RECENT_DAYS_DEFAULT = 7
 RESCAN_DAYS = 90
 
-# ── Reference data (§7.4) ───────────────────────────────────────────────────
+# ── Reference data ──────────────────────────────────────────────────────────
 # Tried in order, first hit wins. Swapping providers is editing this list.
 MARKETCAP_PROVIDERS = [
     p.strip() for p in os.environ.get("INSYN_MARKETCAP_PROVIDERS", "yahoo,manual").split(",")
@@ -82,7 +82,7 @@ FX_CURRENCIES = ("USD", "EUR", "GBP", "CAD", "CHF", "NOK", "DKK", "RUB")
 FX_NO_SERIES = ("BND", "BSD", "BWP", "SCR", "SVC")
 MARKETCAP_DEGRADED_FLOOR = 0.5                 # success ratio below which a provider is 'degraded'
 
-# ── Implausible-price guard (§6.2.1) ────────────────────────────────────────
+# ── Implausible-price guard ─────────────────────────────────────────────────
 # FI sometimes writes a TOTAL amount into the `Pris` column, so volume*price
 # squares it. Peab 2018-03-23 reads 27,993,250 x 240,741,950 SEK = 6.7
 # quadrillion. Unlike the outlier rule this needs no market cap, so it protects
@@ -109,9 +109,9 @@ MAX_EQUITY_UNIT_PRICE_SEK = 10_000.0
 # and stay counted; exactly one row in the corpus exceeds the floor.
 AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK = 1_000_000_000.0
 
-# ── Aggregate windows (§6.5) — anchored to config.today(), not MAX(tx_date) ──
+# ── Aggregate windows — anchored to config.today(), not MAX(tx_date) ─────────
 AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")
 
-# ── Static export (§9) ──────────────────────────────────────────────────────
-EXPORT_PERIODS = ("30d", "90d", "365d", "all")   # §9 file list — no ytd file
+# ── Static export ───────────────────────────────────────────────────────────
+EXPORT_PERIODS = ("30d", "90d", "365d", "all")   # no ytd file
 COMPANY_TX_LIMIT = 50                             # recent transactions per company detail

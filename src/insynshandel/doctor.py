@@ -5,7 +5,7 @@ Two tiers:
 * **DB checks** (default) — structural guarantees and, if a backfill has landed,
   data-shape checks. Never touches the network. Safe to run anywhere, any time.
 * **network checks** (``--network``) — the measured single-window row counts and
-  the bisection-recovery count from §4.6. These fetch from FI (a dozen requests,
+  the bisection-recovery count. These fetch from FI (a dozen requests,
   ~1 min) and run against throwaway in-memory databases, so they never mutate
   the real store.
 """
@@ -20,7 +20,7 @@ from . import config, db
 from .pipeline import ingest
 from .sources import fi
 
-# (window, expected exact count) — windows chosen in §4.6 because they do not cap.
+# (window, expected exact count) — windows chosen because they do not cap.
 # Frozen windows: old enough that FI will not revise them. Exact equality — all
 # six held on 2026-09-08. If one of these ever drifts, the parser or bisector is
 # losing/duplicating rows.
@@ -76,7 +76,7 @@ def _db_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     )
 
     c.check(
-        "no truncated windows (§4.6)",
+        "no truncated windows",
         lambda: (
             (n := conn.execute(
                 "SELECT COUNT(*) FROM fetch_batch WHERE truncated = 1"
@@ -86,18 +86,18 @@ def _db_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     )
 
     c.check(
-        "no coverage_day row for a truncated window (§4.7)",
+        "no coverage_day row for a truncated window",
         lambda: _no_coverage_for_truncated(conn),
     )
 
     if not have_data:
-        c.skip("live-row count band (§4.6)", "no data — run `insyn ingest backfill`")
-        c.skip("zero missing days (§11.2.2)", "no data")
-        c.skip("duplicate-prevention index (§11.1.1)", "no data")
+        c.skip("live-row count band", "no data — run `insyn ingest backfill`")
+        c.skip("zero missing days", "no data")
+        c.skip("duplicate-prevention index", "no data")
         return
 
     c.check(
-        "duplicate-prevention index rejects a live dup (§11.1.1)",
+        "duplicate-prevention index rejects a live dup",
         lambda: _dup_index_holds(conn),
     )
 
@@ -111,11 +111,11 @@ def _db_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     if covers_history:
         lo, hi = PLAUSIBLE_BAND
         c.check(
-            "live-row count in plausible band (§4.6)",
+            "live-row count in plausible band",
             lambda: (lo <= total <= hi, f"{total} live rows (band {lo}-{hi})"),
         )
         c.check(
-            "zero missing days after backfill (§11.2.2)",
+            "zero missing days after backfill",
             lambda: (
                 len(m := ingest.missing_days(conn)) == 0,
                 f"{len(m)} missing days"
@@ -124,10 +124,10 @@ def _db_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         )
     else:
         c.skip(
-            "live-row count band (§4.6)",
+            "live-row count band",
             f"partial data ({total} rows, {span[0]}..{span[1]}) — not a full backfill",
         )
-        c.skip("zero missing days (§11.2.2)", "not a full backfill")
+        c.skip("zero missing days", "not a full backfill")
 
 
 def _no_coverage_for_truncated(conn: sqlite3.Connection) -> tuple[bool, str]:
@@ -189,7 +189,7 @@ def _network_checks(c: _Checks) -> None:
             rows = client.fetch_window(date.fromisoformat(f), date.fromisoformat(t))
             return len(rows) == expected, f"got {len(rows)}"
 
-        c.check(f"fetch {f}..{t} == {expected} (§4.6, frozen)", run)
+        c.check(f"fetch {f}..{t} == {expected} (frozen)", run)
 
     for f, t, expected, measured in RECENT_WINDOWS:
         def run(f=f, t=t, expected=expected) -> tuple[bool, str]:
@@ -197,7 +197,7 @@ def _network_checks(c: _Checks) -> None:
             delta = n - expected
             return n <= expected, f"got {n} ({delta:+d} since plan)"
 
-        c.check(f"fetch {f}..{t} <= {expected} (§4.6, measured {measured})", run)
+        c.check(f"fetch {f}..{t} <= {expected} (measured {measured})", run)
 
     bf, bt, expected = BISECTION_WINDOW
 
@@ -214,7 +214,7 @@ def _network_checks(c: _Checks) -> None:
         good = n == expected and n > single and summary.ok
         return good, f"recovered {n} (single query {single}, expected {expected})"
 
-    c.check(f"bisection recovers {bf}..{bt} == {expected} (§4.6)", bisection)
+    c.check(f"bisection recovers {bf}..{bt} == {expected}", bisection)
 
     def idempotent() -> tuple[bool, str]:
         conn = db.connect(":memory:")
@@ -230,7 +230,7 @@ def _network_checks(c: _Checks) -> None:
             f"/-{s2.rows_superseded}, count {n1}->{n2}"
         )
 
-    c.check("re-running an unchanged window writes nothing (§4.5, inv. 4)", idempotent)
+    c.check("re-running an unchanged window writes nothing", idempotent)
 
     def billerud() -> tuple[bool, str]:
         rows = client.fetch_window(date(2020, 3, 18), date(2020, 3, 18))
@@ -240,16 +240,16 @@ def _network_checks(c: _Checks) -> None:
         ]
         return bool(hit), f"{len(hit)} rows with an embedded ; in beskrivning_av_korrigering"
 
-    c.check("2020-03-18 row round-trips an embedded ; (§4.1.1)", billerud)
+    c.check("2020-03-18 row round-trips an embedded ;", billerud)
 
 
 def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     if not conn.execute("SELECT 1 FROM transaction_norm LIMIT 1").fetchone():
-        c.skip("transaction_norm rebuilt (§5.3)", "empty — run `insyn normalize`")
+        c.skip("transaction_norm rebuilt", "empty — run `insyn normalize`")
         return
 
     c.check(
-        "transaction_norm row count == raw_live (§5.3)",
+        "transaction_norm row count == raw_live",
         lambda: (
             (n := conn.execute("SELECT COUNT(*) FROM transaction_norm").fetchone()[0])
             == (m := conn.execute("SELECT COUNT(*) FROM raw_live").fetchone()[0]),
@@ -257,7 +257,7 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         ),
     )
     c.check(
-        "no NULL published_date/transaction_date/nature/status (§5.3)",
+        "no NULL published_date/transaction_date/nature/status",
         lambda: (
             (n := conn.execute(
                 "SELECT COUNT(*) FROM transaction_norm WHERE published_date IS NULL "
@@ -271,7 +271,7 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     )
     if not aggregated:
         c.check(
-            "derived columns still NULL before aggregate (§5.0)",
+            "derived columns still NULL before aggregate",
             lambda: (
                 (n := conn.execute(
                     "SELECT COUNT(*) FROM transaction_norm WHERE sign IS NOT NULL "
@@ -290,7 +290,7 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     total = sum(r["n"] for r in rows)
     no_lei = sum(r["no_lei"] for r in rows)
     print(f"  INFO  LEI missing on {no_lei}/{total} norm rows "
-          f"({100 * no_lei / max(total, 1):.1f}%) — phase 3 fallback key (inv 9/12)")
+          f"({100 * no_lei / max(total, 1):.1f}%) — aggregate excludes these as no_lei")
     for r in rows:
         if r["no_lei"]:
             print(f"          {r['y']}: {r['no_lei']}/{r['n']} without LEI")
@@ -298,11 +298,11 @@ def _normalize_checks(c: _Checks, conn: sqlite3.Connection) -> None:
 
 def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     if not conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone():
-        c.skip("classification + aggregates (§11.2)", "empty — run `insyn build`")
+        c.skip("classification + aggregates", "empty — run `insyn build`")
         return
 
     c.check(
-        "no unmapped Karaktär values (§11.2)",
+        "no unmapped Karaktär values",
         lambda: (
             len(u := {
                 r["nature"] for r in conn.execute(
@@ -314,7 +314,7 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         ),
     )
     c.check(
-        "every uncounted row has a known exclude_reason (§11.2)",
+        "every uncounted row has a known exclude_reason",
         lambda: (
             (bad := conn.execute(
                 "SELECT COUNT(*) FROM transaction_norm WHERE is_counted = 0 "
@@ -327,7 +327,7 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         ),
     )
     c.check(
-        "every counted row has sign +1/-1 and a gross_value_sek (§6.2)",
+        "every counted row has sign +1/-1 and a gross_value_sek",
         lambda: (
             (bad := conn.execute(
                 "SELECT COUNT(*) FROM transaction_norm WHERE is_counted = 1 AND "
@@ -337,20 +337,20 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         ),
     )
 
-    # § 11.2.1 — outliers. Only meaningful once market caps exist.
+    # Outliers. Only meaningful once market caps exist.
     have_mcap = bool(conn.execute(
         "SELECT 1 FROM market_cap_current WHERE market_cap_sek IS NOT NULL LIMIT 1"
     ).fetchone())
     if have_mcap:
         # The check exists to catch a broken market-cap join, so it must count
         # only rows the cap comparison itself rejected: `exclude_reason` is the
-        # FIRST hit of the ordered §6.2 chain, and `outlier` is its second-to-
+        # FIRST hit of the ordered filter chain, and `outlier` is its second-to-
         # last rule. Filtering instead on `<> 'implausible_unit_price'` swept in
         # every row excluded EARLIER (nature_not_counted, not_current,
         # volume_unit) that `verification` still labels an outlier — 189 of 198
         # on 2026-09-09, none of which the cap ever judged.
         c.check(
-            "unexplained outlier count is small (§11.2.1)",
+            "unexplained outlier count is small",
             lambda: (
                 (n := conn.execute(
                     "SELECT COUNT(*) FROM transaction_norm "
@@ -361,7 +361,7 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             ),
         )
         c.check(
-            "unverifiable rows are still counted (§11.2.1)",
+            "unverifiable rows are still counted",
             lambda: (
                 conn.execute(
                     "SELECT COUNT(*) FROM transaction_norm WHERE verification = "
@@ -374,21 +374,21 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             ),
         )
     else:
-        c.skip("outlier checks (§11.2.1)", "no market caps — every row is unverifiable")
+        c.skip("outlier checks", "no market caps — every row is unverifiable")
 
-    # § 6.2.1 — the encoding guard. Measured, not pass/fail: a non-zero count is
+    # The encoding guard. Measured, not pass/fail: a non-zero count is
     # the rule working. Zero would be the surprise.
     n_imp = conn.execute(
         "SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = 'implausible_unit_price'"
     ).fetchone()[0]
     print(f"  INFO  {n_imp} rows excluded as implausible_unit_price — FI wrote a "
-          f"total into the Pris column (§6.2.1)")
+          f"total into the Pris column")
 
-    # § 11.2.3 — currency
+    # Currency
     have_fx = bool(conn.execute("SELECT 1 FROM fx_rate LIMIT 1").fetchone())
     if have_fx:
         c.check(
-            "no rows excluded for a missing FX rate (§11.2.3)",
+            "no rows excluded for a missing FX rate",
             lambda: (
                 (n := conn.execute(
                     "SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = 'no_fx_rate'"
@@ -397,7 +397,7 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             ),
         )
         c.check(
-            "every currency is covered by fx_rate, SEK, or FX_NO_SERIES (§11.2.3)",
+            "every currency is covered by fx_rate, SEK, or FX_NO_SERIES",
             lambda: _currency_coverage(conn),
         )
         # Rows we can never value, by currency. Not pass/fail — a measured fact
@@ -409,7 +409,7 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             print(f"  INFO  {r['n']} rows in {r['currency']} — no Riksbank series, "
                   f"excluded as no_fx_series (config.FX_NO_SERIES)")
         c.check(
-            "non-SEK rows valued at a transaction-date rate, not today's (§11.2.3)",
+            "non-SEK rows valued at a transaction-date rate, not today's",
             lambda: (
                 (n := conn.execute(
                     "SELECT COUNT(*) FROM transaction_norm WHERE currency <> 'SEK' "
@@ -420,12 +420,12 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             ),
         )
     else:
-        c.skip("currency checks (§11.2.3)", "no fx_rate data — run `insyn refdata fx --backfill`")
+        c.skip("currency checks", "no fx_rate data — run `insyn refdata fx --backfill`")
 
 
 def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
     if not conn.execute("SELECT 1 FROM agg_company_period LIMIT 1").fetchone():
-        c.skip("static export (§9)", "no aggregates — run `insyn build`")
+        c.skip("static export", "no aggregates — run `insyn build`")
         return
 
     import json
@@ -438,7 +438,7 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         files = sorted(p.relative_to(s.out_dir).as_posix() for p in s.out_dir.rglob("*.json"))
 
         c.check(
-            "every dist file is non-empty valid JSON (§9)",
+            "every dist file is non-empty valid JSON",
             lambda: (
                 all(json.loads((s.out_dir / f).read_text()) for f in files),
                 f"{len(files)} files, {s.bytes / 1_000_000:.2f} MB",
@@ -451,21 +451,21 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         }
         missing = required - set(files)
         c.check(
-            "the documented file set is present (§9)",
+            "the documented file set is present",
             lambda: (not missing, f"missing: {sorted(missing)}" if missing else "all present"),
         )
         c.check(
-            "leaderboard is complete — one entry per active company (§8.2)",
+            "leaderboard is complete — one entry per active company",
             lambda: _leaderboard_complete(conn, s.out_dir),
         )
         c.check(
-            "no leaderboard entry has market_cap 0 — the §6.4 sentinel escaped",
+            "no leaderboard entry has market_cap 0 — the 0 sentinel escaped",
             lambda: (not s.warnings, "; ".join(s.warnings) or "clean"),
         )
         c.check(
-            # §9's real worry is a per-company file carrying full history. Assert
+            # The real worry is a per-company file carrying full history. Assert
             # that, not its byte-count proxy — the corpus outgrew "a few MB".
-            "no company file exceeds COMPANY_TX_LIMIT transactions (§9)",
+            "no company file exceeds COMPANY_TX_LIMIT transactions",
             lambda: _company_tx_capped(s.out_dir),
         )
         # Size is a measured fact, not a gate: the cap above is the invariant, and
@@ -474,7 +474,7 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         print(f"  INFO  dist/ is {s.bytes / 1_000_000:.2f} MB over {len(files)} files "
               f"— bounded by COMPANY_TX_LIMIT, not by a byte budget")
         c.check(
-            "companies.json carries no person data (§8.1)",
+            "companies.json carries no person data",
             lambda: (
                 "pdmr" not in (s.out_dir / "companies.json").read_text(),
                 "no pdmr field in the company index",
@@ -483,7 +483,7 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
 
 
 def _company_tx_capped(dist) -> tuple[bool, str]:
-    """§9's actual worry: a company file carrying full history, not 50 rows."""
+    """The actual worry: a company file carrying full history, not 50 rows."""
     import json
 
     worst_lei, worst_n, over = None, 0, 0
@@ -523,15 +523,15 @@ def run(*, network: bool = False) -> int:
         print("  database not migrated — run `insyn db migrate`")
         return 1
     _db_checks(c, conn)
-    print("doctor: normalize checks (§5.3)")
+    print("doctor: normalize checks")
     _normalize_checks(c, conn)
-    print("doctor: classify + aggregate checks (§11.2)")
+    print("doctor: classify + aggregate checks")
     _aggregate_checks(c, conn)
-    print("doctor: static export checks (§9)")
+    print("doctor: static export checks")
     _static_export_checks(c, conn)
 
     if network:
-        print("doctor: network checks (§4.6)")
+        print("doctor: network checks")
         _network_checks(c)
     else:
         print("doctor: network checks skipped (pass --network to run them)")

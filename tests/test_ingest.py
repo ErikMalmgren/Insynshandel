@@ -1,4 +1,4 @@
-"""Phase 1 diff write path (§4.5) — the checks that protect the hourly cron.
+"""Phase 1 diff write path — the checks that protect the hourly cron.
 
 All hermetic: parsed rows are fed straight in, no HTTP.
 """
@@ -33,7 +33,7 @@ def _live_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM raw_live").fetchone()[0]
 
 
-# ── the idempotence guarantee (§11.1.1) ────────────────────────────────────
+# ── the idempotence guarantee ──────────────────────────────────────────────
 def test_reingesting_identical_data_writes_nothing(db_conn, sample_export_bytes):
     rows = fi.parse_export(sample_export_bytes)
     leaf = _leaf(rows, "2016-07-01", "2026-05-01")
@@ -61,7 +61,7 @@ def test_unchanged_rows_only_touch_last_seen_batch(db_conn):
     assert set(seen.values()) == {b2}
 
 
-# ── the duplicate-prevention index (§4.4, §11.1.1) ─────────────────────────
+# ── the duplicate-prevention index ─────────────────────────────────────────
 def test_partial_unique_index_rejects_second_live_copy(db_conn):
     leaf = _leaf([_mk("dup", 0, "2020-03-03")])
     ingest.write_leaf(db_conn, _open_batch(db_conn, leaf), leaf)
@@ -86,7 +86,7 @@ def test_superseded_key_can_be_reinserted_as_new_live_row(db_conn):
     assert db_conn.execute("SELECT COUNT(*) FROM raw_transaction").fetchone()[0] == 2
 
 
-# ── revisions (§4.3.1) ────────────────────────────────────────────────────
+# ── revisions ─────────────────────────────────────────────────────────────
 def test_status_flip_supersedes_old_and_inserts_new(db_conn, sample_export_bytes):
     rows = fi.parse_export(sample_export_bytes)
     wanstedt = [r for r in rows if r.fields["person_i_ledande_stallning"] == "Stefan Wänstedt"]
@@ -114,7 +114,7 @@ def test_status_flip_supersedes_old_and_inserts_new(db_conn, sample_export_bytes
     ).fetchone()[0] == 1
 
 
-# ── leaf scoping (§4.5.3) ─────────────────────────────────────────────────
+# ── leaf scoping ──────────────────────────────────────────────────────────
 def test_leaf_diff_never_touches_a_sibling_leafs_rows(db_conn):
     left = _leaf([_mk("L", 0, "2020-03-02")], "2020-03-01", "2020-03-07")
     right = _leaf([_mk("R", 0, "2020-03-10")], "2020-03-08", "2020-03-15")
@@ -139,7 +139,7 @@ def test_a_wrongly_parent_scoped_diff_would_be_caught(db_conn):
     assert _live_count(db_conn) == before  # never reduced
 
 
-# ── truncated windows (§4.5.4, §4.7) ──────────────────────────────────────
+# ── truncated windows ─────────────────────────────────────────────────────
 def test_truncated_window_inserts_only_never_supersedes(db_conn):
     full = _leaf([_mk("a", 0, "2020-03-13"), _mk("b", 0, "2020-03-13")],
                  "2020-03-13", "2020-03-13")
@@ -161,7 +161,7 @@ def test_truncated_window_writes_no_coverage_day(db_conn):
     assert db_conn.execute("SELECT COUNT(*) FROM coverage_day").fetchone()[0] == 0
 
 
-# ── coverage_day (§4.7) ───────────────────────────────────────────────────
+# ── coverage_day ──────────────────────────────────────────────────────────
 def test_coverage_day_written_for_every_calendar_day_including_empty(db_conn):
     leaf = _leaf([_mk("x", 0, "2020-03-03"), _mk("y", 0, "2020-03-03")],
                  "2020-03-02", "2020-03-05")

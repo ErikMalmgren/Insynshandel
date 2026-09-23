@@ -4,8 +4,8 @@
  * companies.json so the nav link has somewhere to land.
  *
  * THIS IS THE ONLY FILE ON THE SITE THAT RENDERS `pdmr` OR `position`.
- * §8.1 grants person fields on a company's own transaction list and nowhere
- * else (invariant 15): no name search, no person page, no name column on the
+ * Person fields belong on a company's own transaction list and nowhere
+ * else: no name search, no person page, no name column on the
  * leaderboard, no sorting or filtering by person anywhere. The picker below
  * filters on company name and ticker only — the same two fields
  * companies.json carries, which is not an accident.
@@ -103,11 +103,11 @@ function facts(c) {
         ? el('code', { text: c.primary_isin })
         : el('span', { class: 'muted', text: '—' }));
 
-    /* null renders '—', never 0 (invariant 11). Only ~20% of issuers have a
+    /* null renders '—', never 0. Only ~20% of issuers have a
      * market cap, so this is the common case and has to look deliberate. */
     if (c.market_cap === 0) {
         console.warn(`insyn: market_cap sentinel 0 reached the view for ${c.lei} `
-            + '— a query bypassed market_cap_current (invariant 11)');
+            + '— a query bypassed market_cap_current');
     }
     if (c.market_cap === null || c.market_cap === undefined) {
         row('Market cap', el('span', { class: 'muted', text: '— not available' }));
@@ -209,7 +209,7 @@ function transactions(c) {
     const rows = c.recent_transactions.map((t) => {
         const tr = el('tr', {}, [
             /* Verbatim — FI's dates are Europe/Stockholm local text and must
-             * not be parsed and re-rendered through Date() (§16.5). */
+             * not be parsed and re-rendered through Date(). */
             el('td', { text: t.transaction_date }),
             el('td', { class: 'opt muted', text: t.published_date }),
             el('td', { text: t.pdmr }),
@@ -224,7 +224,7 @@ function transactions(c) {
             t.gross_value_sek === null || !t.is_counted
                 ? dashCell()
                 : moneyCell(t.gross_value_sek * (t.sign || 1), { signed: true }),
-            /* No row is ever uncounted without a reason (invariant 8), so the
+            /* No row is ever uncounted without a reason, so the
              * reason is shown rather than left as a silent blank. */
             el('td', {
                 class: t.is_counted ? null : 'muted',

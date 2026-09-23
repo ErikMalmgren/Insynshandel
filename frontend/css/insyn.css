@@ -1,8 +1,8 @@
 /* insyn.css — the design system for insyn.malmgren.dev
  *
  * The token block and the base rules below are a COPY of
- * malmgren.dev/css/terminal.css, taken 2026-09-09. A copy, not a share
- * (§16.4): there is no build step here and no submodule, and two small repos
+ * malmgren.dev/css/terminal.css, taken 2026-09-09. A copy, not a share:
+ * there is no build step here and no submodule, and two small repos
  * drifting slightly is cheaper than coupling them. If you change a colour
  * here, nothing over there changes — that is the deal.
  *
@@ -33,7 +33,7 @@
 
     /* The table's own measure. --col is a measure for prose and eleven
      * columns do not fit in 96ch; rather than bend the column rules that make
-     * about.html readable, the board gets a container of its own (§16.4).
+     * about.html readable, the board gets a container of its own.
      *
      * 128ch is measured, not chosen: it is what the eleven columns need at
      * 0.75ch of cell padding, so nothing is clipped on a 1280px display. The
@@ -525,7 +525,7 @@ th[aria-sort="descending"] button::after {
     font-variant-numeric: tabular-nums;
 }
 
-/* A sell. Coloured AND signed — never colour alone (§16.5). */
+/* A sell. Coloured AND signed — never colour alone. */
 .neg {
     color: var(--err);
 }
@@ -562,15 +562,15 @@ th[aria-sort="descending"] button::after {
 }
 
 /* An excluded transaction is shown, greyed, with its reason — no row is ever
- * dropped from the list without saying why (invariant 8). */
+ * dropped from the list without saying why. */
 tr[data-counted="0"] td {
     color: var(--muted);
 }
 
 /* ---------- about page ---------- */
 
-/* Rendered loudly on purpose: an empty unmapped_natures is the normal state
- * (invariant 7), so a non-empty one must not look like ordinary content. */
+/* Rendered loudly on purpose: an empty unmapped_natures is the normal state,
+ * so a non-empty one must not look like ordinary content. */
 .alarm {
     border-left: 2px solid var(--err);
     padding-left: 1ch;

@@ -1,4 +1,4 @@
-"""Riksbank SWEA — daily SEK exchange rates (§6.3.1).
+"""Riksbank SWEA — daily SEK exchange rates.
 
 Free, no key. One call per currency covers the whole register (a decade-wide
 range returns ~100 KB). Gaps on weekends and Swedish holidays are stored as-is;
@@ -29,7 +29,7 @@ SERIES: dict[str, str] = {
     "RUB": "SEKRUBPMI",
 }
 
-# ~3 requests/minute before a 429 (§6.3.1). Only matters if a range is rejected
+# ~3 requests/minute before a 429. Only matters if a range is rejected
 # and we chunk by year — a whole-range fetch is 4 calls total.
 RIKSBANK_SPACING_S = float(os.environ.get("INSYN_RIKSBANK_SPACING_S", "25"))
 

@@ -1,4 +1,4 @@
--- Phase 1 — raw store. Source-faithful, append-only. See plan/01-ingest.md §4.4.
+-- Phase 1 — raw store. Source-faithful, append-only.
 PRAGMA journal_mode = WAL;
 
 CREATE TABLE fetch_batch (
@@ -9,7 +9,7 @@ CREATE TABLE fetch_batch (
   started_at    TEXT    NOT NULL,
   finished_at   TEXT,
   row_count       INTEGER,                 -- rows FI returned
-  rows_inserted   INTEGER,                 -- rows new to us (see §4.5)
+  rows_inserted   INTEGER,                 -- rows new to us
   rows_superseded INTEGER,                 -- rows FI stopped returning
   truncated     INTEGER NOT NULL DEFAULT 0,  -- 1 = hit cap at day granularity
   http_status   INTEGER,
@@ -50,7 +50,7 @@ CREATE TABLE raw_transaction (
 );
 
 -- One row per calendar day we have successfully fetched. Makes "which days are
--- we missing?" a single anti-join instead of interval arithmetic. See §4.7.
+-- we missing?" a single anti-join instead of interval arithmetic.
 CREATE TABLE coverage_day (
   pub_date         TEXT PRIMARY KEY,   -- YYYY-MM-DD
   first_fetched_at TEXT NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE coverage_day (
 );
 
 -- THE duplicate-prevention guarantee: the DB itself refuses two live copies of
--- the same source row. Everything in §4.5 depends on this index.
+-- the same source row. The diff write path depends on this index.
 CREATE UNIQUE INDEX ux_raw_live_key
     ON raw_transaction(row_hash, ordinal)
  WHERE superseded_at IS NULL;

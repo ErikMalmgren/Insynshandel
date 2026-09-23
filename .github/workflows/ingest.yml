@@ -1,8 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# §10.1 — the static-only deployment path (free: no server, no VPS).
+# The static-only deployment path (free: no server, no VPS).
 #
 #   Job `ingest`: restore the DB from the rolling `db-latest` release → fetch →
-#   build → export → doctor → re-upload the DB → assemble `site/` (§16.2).
+#   build → export → doctor → re-upload the DB → assemble `site/`.
 #   Job `deploy`: publish `site/` to this repo's Pages (insyn.malmgren.dev).
 #
 #   Needs Settings → Pages → Source: "GitHub Actions". The custom domain is
@@ -19,7 +19,7 @@ on:
     - cron: "0 5-19 * * 1-5"     # ~06:00–20:00 CET, Mon–Fri — hourly poll
     - cron: "0 2 * * *"          # ~03:00 CET, nightly — gaps + 90-day re-scan
 
-# Never let two runs write the database at once (§10.1).
+# Never let two runs write the database at once.
 concurrency:
   group: ingest
   cancel-in-progress: false
@@ -59,17 +59,17 @@ jobs:
             uv run insyn db migrate
           fi
 
-      # 2. Heal any missed window — nightly only (§4.7).
+      # 2. Heal any missed window — nightly only.
       - name: Heal gaps (nightly)
         if: env.IS_NIGHTLY == 'true'
         run: uv run insyn ingest gaps
 
       # 3. Incremental fetch. --days 7 hourly so a short outage self-heals;
-      #    --days 90 on the nightly run. Writes nothing when nothing changed (§4.5).
+      #    --days 90 on the nightly run. Writes nothing when nothing changed.
       - name: Ingest recent
         run: uv run insyn ingest recent --days "$RECENT_DAYS"
 
-      # 4. Rebuild — normalize → refdata → aggregate, in that order (§5.0).
+      # 4. Rebuild — normalize → refdata → aggregate, in that order.
       #    FIGI/market-caps run here; --no-marketcaps if yfinance is too flaky
       #    in CI (the site then serves `verification: "unverifiable"`).
       - name: Build
@@ -93,8 +93,8 @@ jobs:
             || gh release create db-latest --title "Latest database snapshot" --notes "Rolling. Updated by the ingest workflow."
           gh release upload db-latest data/insynshandel.db --clobber
 
-      # 6b. Assemble the site (§16.2): frontend at the root, JSON under data/
-      #     (`API_BASE = './data'`, §9). Never export into frontend/ or copy the
+      # 6b. Assemble the site: frontend at the root, JSON under data/
+      #     (`API_BASE = './data'`). Never export into frontend/ or copy the
       #     frontend into dist/ — export_static rmtree's its --out directory.
       - name: Assemble site
         run: |

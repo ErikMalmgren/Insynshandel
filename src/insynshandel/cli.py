@@ -218,7 +218,7 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
         print(
             f"  LEI missing on {s.rows_without_lei} rows ({pct:.1f}%); "
             f"{s.rows_without_lei_or_isin} have neither LEI nor ISIN "
-            f"— phase 3 keys on this (see CLAUDE.md)"
+            f"— aggregate excludes these as no_lei"
         )
     for label, counter in (
         ("volume_unit", s.distinct_volume_unit),
@@ -230,7 +230,7 @@ def _cmd_normalize(args: argparse.Namespace) -> int:
         print(f"  !! odd boolean {odd} x{n} (treated as 0)")
     for col, n in s.missing_required.items():
         print(f"  !! {n} rows with empty required field {col!r}")
-    print("  next: `insyn aggregate` — until then every derived column is NULL (§5.0)")
+    print("  next: `insyn aggregate` — until then every derived column is NULL")
     return 0 if s.ok else 1
 
 
@@ -248,12 +248,12 @@ def _print_classify(s: aggregate.ClassifySummary) -> None:
         print(f"  !! {s.no_fx_rows} rows have no FX rate — run `insyn refdata fx --backfill`")
     if s.implausible_price_rows:
         print(f"  -- {s.implausible_price_rows} rows excluded as implausible_unit_price "
-              f"(§6.2.1: a total written into the Pris column)")
+              f"(a total written into the Pris column)")
     if s.no_fx_series_rows:
         print(f"  -- {s.no_fx_series_rows} rows in a currency with no Riksbank series "
               f"({', '.join(config.FX_NO_SERIES)}) — excluded as no_fx_series")
     if not s.market_caps_available:
-        print("  !! no market caps loaded — every counted row is 'unverifiable' (§6.4). "
+        print("  !! no market caps loaded — every counted row is 'unverifiable'. "
               "Run `insyn refdata figi marketcaps` (needs the backfill first).")
 
 
@@ -375,22 +375,22 @@ def build_parser() -> argparse.ArgumentParser:
     bf.add_argument("--to", dest="to_date", metavar="YYYY-MM-DD")
     rc = ing_sub.add_parser("recent", help="incremental fetch of the last N days")
     rc.add_argument("--days", type=int, default=config.RECENT_DAYS_DEFAULT)
-    gp = ing_sub.add_parser("gaps", help="heal an outage (§4.7)")
+    gp = ing_sub.add_parser("gaps", help="heal an outage")
     gp.add_argument("--dry-run", action="store_true")
     gp.add_argument("--max-days", type=int, default=400)
 
-    sub.add_parser("normalize", help="rebuild transaction_norm from raw_live (§5)")
+    sub.add_parser("normalize", help="rebuild transaction_norm from raw_live")
 
-    rd = sub.add_parser("refdata", help="reference data: fx / figi / marketcaps (§7)")
+    rd = sub.add_parser("refdata", help="reference data: fx / figi / marketcaps")
     rd.add_argument("steps", nargs="+", choices=["fx", "figi", "marketcaps"])
     rd.add_argument("--backfill", action="store_true", help="fx: fetch from 2016-07-01")
     rd.add_argument("--limit", type=int, default=None, help="figi: cap ISINs this run")
     rd.add_argument("--quiet", action="store_true",
                     help="fx/figi/marketcaps: no progress meter, only the summary")
 
-    sub.add_parser("aggregate", help="classify transaction_norm + build aggregates (§6)")
+    sub.add_parser("aggregate", help="classify transaction_norm + build aggregates")
 
-    bd = sub.add_parser("build", help="normalize -> refdata -> aggregate (§5.0)")
+    bd = sub.add_parser("build", help="normalize -> refdata -> aggregate")
     bd.add_argument("--fx-backfill", action="store_true")
     bd.add_argument("--figi-limit", type=int, default=None)
     bd.add_argument("--no-figi", action="store_true", help="skip the OpenFIGI step")
@@ -399,12 +399,12 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--quiet", action="store_true",
                     help="no fx/figi/marketcaps progress meter, only the summaries")
 
-    es = sub.add_parser("export-static", help="dump the read layer to static JSON (§9)")
+    es = sub.add_parser("export-static", help="dump the read layer to static JSON")
     es.add_argument("--out", default="dist", help="output directory (default: dist/)")
 
-    doc = sub.add_parser("doctor", help="run acceptance checks (§11)")
+    doc = sub.add_parser("doctor", help="run acceptance checks")
     doc.add_argument("--network", action="store_true",
-                     help="also run the live single-window fetch checks (§4.6)")
+                     help="also run the live single-window fetch checks")
 
     return p
 

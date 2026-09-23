@@ -1,4 +1,4 @@
-"""ManualProvider — the committed seed-file escape hatch (§7.4.1).
+"""ManualProvider — the committed seed-file escape hatch.
 
 Reads ``data/seed/market_cap_manual.csv``: one row per company no automated
 source can price.
@@ -49,7 +49,7 @@ class ManualProvider:
             try:
                 as_of = row["as_of"].strip()
                 # a future as_of would become the permanent MAX(as_of) 'current'
-                # snapshot that no later real fetch could displace (§7.1).
+                # snapshot that no later real fetch could displace.
                 if not (_MIN_AS_OF <= as_of <= config.today().isoformat()):
                     failures.append(FetchFailure(
                         c.lei, c.lei, f"as_of {as_of!r} is out of range"))

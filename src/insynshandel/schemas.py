@@ -1,8 +1,8 @@
-"""Pydantic models — the schema of every static JSON file (§9). No database
+"""Pydantic models — the schema of every static JSON file. No database
 access here.
 
-Money fields are plain SEK numbers, never formatted (§6.3). Missing market cap is
-``None`` → serialized ``null``, never ``0`` (§6.4) — hence ``float | None`` with
+Money fields are plain SEK numbers, never formatted. Missing market cap is
+``None`` → serialized ``null``, never ``0`` — hence ``float | None`` with
 no default rather than ``float = 0``.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-Verification = str  # 'ok' | 'unverifiable'  (never 'outlier' at company level, §6.4)
+Verification = str  # 'ok' | 'unverifiable'  (never 'outlier' at company level)
 
 
 class Meta(BaseModel):
@@ -76,7 +76,7 @@ class NameVariant(BaseModel):
 class CompanyTransaction(BaseModel):
     transaction_date: str
     published_date: str
-    pdmr: str            # a company's own transaction list, as FI shows it (§8.1)
+    pdmr: str            # a company's own transaction list, as FI shows it
     position: str
     nature: str
     sign: int | None

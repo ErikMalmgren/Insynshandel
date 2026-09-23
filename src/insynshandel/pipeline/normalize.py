@@ -1,9 +1,9 @@
-"""Phase 2 — rebuild ``transaction_norm`` from ``raw_live`` (§5).
+"""Phase 2 — rebuild ``transaction_norm`` from ``raw_live``.
 
 A full rebuild every run: ``transaction_norm`` is a pure function of
-``raw_live`` + parsing rules and holds no state of its own (§5.0). The derived
+``raw_live`` + parsing rules and holds no state of its own. The derived
 columns (``sign`` … ``gross_value_sek``) are left ``NULL`` — ``insyn aggregate``
-writes those, and it must run next (invariant 6).
+writes those, and it must run next.
 """
 
 from __future__ import annotations
@@ -40,9 +40,9 @@ _BOOL_MAP: dict[str, str] = {
 }
 # Required: verified always present, even in 2016 (measured 2026-09-08). Stored
 # as NULL when blank so doctor catches a regression. NOTE: `lei` is deliberately
-# NOT here — §5.3 lists it, but 78.7% of 2016-07 rows and 61.6% of 2017-01 rows
-# carry no LEI. It is carried through verbatim ('' when absent); phase 3 owns the
-# fallback-key decision (see CLAUDE.md gotchas, invariants 9/12).
+# NOT here — 78.7% of 2016-07 rows and 61.6% of 2017-01 rows carry no LEI. It
+# is carried through verbatim ('' when absent); aggregate excludes those rows
+# as `no_lei`.
 _REQUIRED = ("published_date", "transaction_date", "nature", "status")
 
 _NORM_COLUMNS = (
@@ -65,7 +65,7 @@ class NormalizeSummary:
     distinct_currency: Counter = field(default_factory=Counter)
     distinct_status: Counter = field(default_factory=Counter)
     missing_required: Counter = field(default_factory=Counter)
-    rows_without_lei: int = 0            # measured statistic, not an error (§ inv 9/12)
+    rows_without_lei: int = 0            # measured statistic, not an error
     rows_without_lei_or_isin: int = 0
 
     @property
@@ -74,7 +74,7 @@ class NormalizeSummary:
 
 
 def parse_number(s: str) -> float | None:
-    """`'2 600 000,0'` → 2600000.0. Returns None on failure (§5.2), never raises."""
+    """`'2 600 000,0'` → 2600000.0. Returns None on failure, never raises."""
     s = s.replace("\xa0", "").replace(" ", "").replace(",", ".").strip()
     if not s:
         return None

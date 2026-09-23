@@ -3,12 +3,12 @@
 Small, hand-maintained CSVs that the pipeline reads but never writes. Each is
 loaded into a table during `insyn build` / `insyn db migrate`.
 
-| File | Loaded into | Added in | Plan |
-| --- | --- | --- | --- |
-| `ticker_override.csv` | `ticker_override` | Phase 0 (seeded), used Phase 5 | §7.3 |
-| `nature_map.csv` | `nature_map` | Phase 3 | §6.1 |
-| `market_cap_manual.csv` | ManualProvider input | Phase 5 | §7.4 |
-| `issuer_alias.csv` | `issuer_alias` | Phase 3/5 | §7.2.3 |
+| File | Loaded into |
+| --- | --- |
+| `ticker_override.csv` | `ticker_override` |
+| `nature_map.csv` | `nature_map` |
+| `market_cap_manual.csv` | ManualProvider input |
+| `issuer_alias.csv` | `issuer_alias` |
 
 ## `ticker_override.csv`
 
@@ -20,13 +20,13 @@ Columns: `lei,provider,symbol,note`.
   - **`?`** → unresolved worklist item; **the loader skips it** (stays here as a
     to-do, contributes nothing to the DB);
   - **`''` (empty)** with a `note` → "checked, this company genuinely has no
-    listed symbol" (§7.4.2) — loaded, stops anyone re-investigating.
+    listed symbol" — loaded, stops anyone re-investigating.
 - `note` — free text.
 
 ### Seeding note
 
-Seeded from the legacy `failed_isins.csv` (deleted 2026-09-23) — 61 LEIs whose ISIN OpenFIGI's
-XSTO lookup could not resolve as of the legacy run, all marked `symbol = ?`.
+Seeded with 61 LEIs whose ISIN an earlier OpenFIGI XSTO lookup could not
+resolve, all marked `symbol = ?`.
 **"OpenFIGI failed" is not "this company has no symbol"** — most are real listed
 companies the lookup just missed. `db.load_seeds()` skips every `?` row.
 

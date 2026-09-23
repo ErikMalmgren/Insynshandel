@@ -1,6 +1,6 @@
 """SQLite connection and migration helpers.
 
-The ingest is the only writer; the API opens the same file read-only. All money
+The pipeline is the only writer; the static export opens the file read-only. All money
 and number parsing happens downstream — this layer is schema plumbing only.
 """
 
@@ -20,7 +20,7 @@ def connect(path: Path | str | None = None, *, read_only: bool = False) -> sqlit
 
     ``isolation_level=None`` (autocommit) is deliberate: the diff write path
     issues its own ``BEGIN IMMEDIATE`` so two overlapping cron runs serialize
-    instead of corrupting the table (§4.5.2). Python's default deferred ``BEGIN``
+    instead of corrupting the table. Python's default deferred ``BEGIN``
     would not give that guarantee.
     """
     path = Path(path) if path is not None else config.DB_PATH
@@ -90,7 +90,7 @@ def load_seeds(conn: sqlite3.Connection) -> dict[str, int]:
 
     Runs on every ``migrate`` **and** at the start of ``insyn aggregate`` — the
     plan's only lever for the classification (edit ``nature_map.csv``, re-run)
-    depends on this being a full reload, not a load-once (§6.1.2).
+    depends on this being a full reload, not a load-once.
     """
     counts: dict[str, int] = {}
 

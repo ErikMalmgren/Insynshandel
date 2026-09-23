@@ -1,7 +1,7 @@
 /* leaderboard.js — index.html.
  *
  * One fetch per period, cached for the life of the page. Every sortable field
- * ships in every entry (§9), so switching period, sorting a column and typing
+ * ships in every entry, so switching period, sorting a column and typing
  * in the filter box are pure client work with no round trip.
  *
  * No person field is read here, by design — see the header of insyn.js.
@@ -17,7 +17,7 @@ const PERIODS = [
     ['all',  'all time'],
 ];
 
-/* The eleven columns of §16.3, in that order.
+/* The eleven columns, in display order.
  *
  * `opt` comes off below 46rem; the rest still scrolls inside .scroller. The
  * four dropped are the ones net and tx already summarise — a phone shows
@@ -37,9 +37,9 @@ const COLUMNS = [
     { key: 'verification',   label: 'verified', kind: 'text' },
 ];
 
-/* §16.6: net descending on the 30d board is the landing state. All four of
+/* Net descending on the 30d board is the landing state. All four of
  * net / pct_of_mcap / buyer_count ship in every entry, so changing this is one
- * line — see §14.4 on why net ranks the largest companies every time. */
+ * line. Ranking by net puts the largest companies on top every time. */
 const state = { period: '30d', key: 'net_value_sek', dir: 'desc', filter: '' };
 
 const statusNode = document.getElementById('status');
@@ -126,7 +126,7 @@ function compare(a, b) {
 
     let r = col.kind === 'text' ? String(av).localeCompare(String(bv), 'sv') : av - bv;
     if (state.dir === 'desc') r = -r;
-    /* The export is unsorted (§8.2), so ties need a stable tiebreak of their
+    /* The export is unsorted, so ties need a stable tiebreak of their
      * own or the row order wanders between renders. */
     return r || a.name.localeCompare(b.name, 'sv') || a.lei.localeCompare(b.lei);
 }
@@ -161,8 +161,8 @@ function cell(entry, col) {
     const value = entry[col.key];
     /* `verification` is derived: reads.py sets it from whether a market cap
      * exists at all, so this column is exactly `mcap !== '—'` and 'ok' means
-     * "there was something to check against", not "checked and passed". §6.4's
-     * outlier verdict never reaches company level. Say so in the title rather
+     * "there was something to check against", not "checked and passed". The
+     * per-row outlier verdict never reaches company level. Say so in the title rather
      * than letting a bare 'ok' claim more than it does. */
     return el('td', {
         class: [col.cls, value ? '' : 'dash',

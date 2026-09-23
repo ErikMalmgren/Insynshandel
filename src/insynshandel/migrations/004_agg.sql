@@ -1,6 +1,6 @@
--- Phase 3 — aggregates (§6.5). Keyed on `lei` (invariant 12). Rebuilt in full by
+-- Phase 3 — aggregates. Keyed on `lei`. Rebuilt in full by
 -- `insyn aggregate` after the classify pass writes transaction_norm's derived
--- columns. Precomputed windows only; the API computes arbitrary ranges live.
+-- columns. Precomputed windows only.
 CREATE TABLE agg_company_period (
   lei             TEXT NOT NULL,
   period          TEXT NOT NULL,   -- '30d' | '90d' | '365d' | 'ytd' | 'all'
@@ -12,7 +12,7 @@ CREATE TABLE agg_company_period (
   tx_count        INTEGER NOT NULL, -- is_counted = 1 only
   buyer_count     INTEGER NOT NULL, -- DISTINCT pdmr with sign = +1
   seller_count    INTEGER NOT NULL, -- DISTINCT pdmr with sign = -1
-  n_unverifiable  INTEGER NOT NULL, -- counted rows with no market cap (§6.4)
+  n_unverifiable  INTEGER NOT NULL, -- counted rows with no market cap
   computed_at     TEXT NOT NULL,
   PRIMARY KEY (lei, period)
 );

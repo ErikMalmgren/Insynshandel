@@ -2,21 +2,21 @@
  *
  * No person field — neither the reporting insider's name nor their position —
  * is read anywhere in this file. Those two render inside company.js and
- * nowhere else, because §8.1 grants them on a company's own transaction list
- * only (invariant 15): no name search, no person page, no name column on the
+ * nowhere else, because they belong on a company's own transaction list
+ * only: no name search, no person page, no name column on the
  * leaderboard, no sorting or filtering by person anywhere. Anything generic
  * enough to live in a shared module is generic enough to end up on the
  * leaderboard by accident, which is how a person index gets built without
  * anyone ever deciding to build one.
  *
- * §16.5 turns that into a check you can run: the field name must not appear
+ * That makes a check you can run: the field name must not appear
  * outside company.js. It is satisfied structurally — the rendering lives
  * there — not by spelling the word differently here.
  */
 
 /* ---------- where the data comes from ----------
  *
- * §9: static JSON next to the pages, under window.API_BASE (default './data',
+ * Static JSON next to the pages, under window.API_BASE (default './data',
  * which is where the ingest workflow's assemble step puts the export). The
  * file layout is mapped here, once, so every caller asks for a resource rather
  * than building a path.
@@ -39,10 +39,10 @@ export const url = {
  *
  * Cached per URL, forever. Switching period, sorting a column and typing in
  * the filter box are pure client work — every sortable field ships in every
- * entry (§9), so there is nothing to go back to the network for. That is an
+ * entry, so there is nothing to go back to the network for. That is an
  * acceptance check: sorting and re-selecting a period must issue no request.
  *
- * No cache-busting on the JSON (§16.7). Do not add a meta.json-as-manifest
+ * No cache-busting on the JSON. Do not add a meta.json-as-manifest
  * scheme without first reading the cache-control header off the deployed site
  * — it costs two serial round trips before first paint and may buy nothing.
  */
@@ -66,7 +66,7 @@ export function getJSON(target) {
 
 /* ---------- formatting ----------
  *
- * Money is a plain number in the JSON by design (§6.3) — the server never
+ * Money is a plain number in the JSON by design — the export never
  * formats it. Compact in the cell, full value in `title`.
  */
 
@@ -132,7 +132,7 @@ export function moneyCell(value, { signed = false, className = '' } = {}) {
 
 /* Market cap.
  *
- * `null` renders an em dash, never 0 (invariant 11, §16.5). A 0 reaching this
+ * `null` renders an em dash, never 0. A 0 reaching this
  * function means the sentinel escaped `market_cap_current` somewhere between
  * the view and the browser, so it is worth a console.warn even though the cell
  * renders harmlessly — read as a real company worth nothing, it is a silent
@@ -142,7 +142,7 @@ export function mcapCell(value, lei, { className = '' } = {}) {
     if (value === 0) {
         console.warn(
             `insyn: market_cap sentinel 0 reached the view for ${lei} — `
-            + 'a query bypassed market_cap_current (invariant 11)');
+            + 'a query bypassed market_cap_current');
     }
     if (value === null || value === undefined) return dashCell(className);
     return moneyCell(value, { className });
@@ -174,7 +174,7 @@ export function dashCell(className = '') {
 
 /* FI's dates are Europe/Stockholm local text. Print them verbatim — parsing
  * and re-rendering through Date() shifts them by a day near midnight for
- * anyone in another zone (§16.5). Only computed_at / last_ingest_at carry an
+ * anyone in another zone. Only computed_at / last_ingest_at carry an
  * offset, and those are the only ones worth localising. */
 export function stamp(iso) {
     if (!iso) return 'unknown';

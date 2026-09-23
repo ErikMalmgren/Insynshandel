@@ -1,8 +1,7 @@
-"""The provider seam (§7.4.1).
+"""The provider seam.
 
 `yfinance` is unofficial scraping — treat it as one implementation, never the
-interface. A provider's `fetch()` **never raises**; partial success is normal
-(§7.4.3).
+interface. A provider's `fetch()` **never raises**; partial success is normal.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from ... import config
 
 @dataclass(frozen=True, slots=True)
 class Company:
-    """Provider-neutral identity (§7.4.2). Each provider derives its own symbol."""
+    """Provider-neutral identity. Each provider derives its own symbol."""
 
     lei: str
     display_name: str

@@ -1,4 +1,4 @@
-"""Phase 3 — classify (§6.2) + aggregate (§6.5). Hermetic; FX is seeded, not fetched."""
+"""Phase 3 — classify + aggregate. Hermetic; FX is seeded, not fetched."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def classified(db_conn, sample_export_bytes):
     return db_conn, s
 
 
-# ── unmapped Karaktär must fail the build (§6.1.2) ─────────────────────────
+# ── unmapped Karaktär must fail the build ──────────────────────────────────
 def test_unmapped_nature_fails_classify(db_conn, sample_bytes):
     _seed_fx(db_conn)
     _ingest(db_conn, sample_bytes)  # full fixture incl the synthetic unmapped row
@@ -60,7 +60,7 @@ def test_run_returns_early_on_unmapped(db_conn, sample_bytes):
     assert db_conn.execute("SELECT COUNT(*) FROM agg_company_period").fetchone()[0] == 0
 
 
-# ── the ordered §6.2 filter ───────────────────────────────────────────────
+# ── the ordered filter ────────────────────────────────────────────────────
 def test_every_uncounted_row_has_a_reason(classified):
     conn, _ = classified
     orphans = conn.execute(
@@ -149,7 +149,7 @@ def test_status_beats_volume_unit_in_ordering(db_conn):
     ).fetchone()[0] == "not_current"
 
 
-# ── currency conversion (§6.3) ────────────────────────────────────────────
+# ── currency conversion ───────────────────────────────────────────────────
 def test_sek_rows_convert_at_identity(classified):
     conn, _ = classified
     for r in conn.execute(
@@ -217,7 +217,7 @@ def test_unlisted_currency_still_reads_no_fx_rate(db_conn):
     assert s.no_fx_series_rows == 0
 
 
-# ── outliers (§6.4) ───────────────────────────────────────────────────────
+# ── outliers ──────────────────────────────────────────────────────────────
 def test_outlier_needs_a_market_cap_to_fire(classified):
     conn, s = classified
     # no market caps seeded -> nothing can be an outlier, everything unverifiable
@@ -239,7 +239,7 @@ def test_outlier_excluded_but_unverifiable_counted(db_conn):
         return f, cap
     # 1e8 shares @ 5 000 SEK = 5e11 > the 3e11 cap. Unit price stays under
     # MAX_EQUITY_UNIT_PRICE_SEK and volume != price, so this is a real outlier
-    # and not the §6.2.1 encoding error, which would claim it first.
+    # and not the implausible-unit-price encoding error, which would claim it first.
     specs = [mk("BIG", 100_000_000, 5_000, 3.0e11),         # 5e11 > cap -> outlier
              mk("OKAY", 1000, 50, 3.0e11),                   # tiny -> ok
              mk("NOCAP", 1000, 50, None)]                    # no cap -> unverifiable
@@ -282,10 +282,10 @@ def test_market_cap_zero_serialises_as_null_never_negative(db_conn):
     row = db_conn.execute(
         "SELECT market_cap_sek FROM market_cap_current WHERE lei = 'Z'"
     ).fetchone()
-    assert row["market_cap_sek"] is None  # the CASE-without-ELSE guard (§6.4)
+    assert row["market_cap_sek"] is None  # the CASE-without-ELSE guard
 
 
-# ── aggregate pass (§6.5) ─────────────────────────────────────────────────
+# ── aggregate pass ────────────────────────────────────────────────────────
 def test_windows_written_and_all_is_widest(db_conn, sample_export_bytes):
     _seed_fx(db_conn)
     _ingest(db_conn, sample_export_bytes)
@@ -366,7 +366,7 @@ def test_reaggregation_is_idempotent(db_conn, sample_export_bytes):
     assert tuple(n1) == tuple(n2)
 
 
-# ── §6.2.1 implausible unit price — the market-cap-independent guard ────────
+# ── implausible unit price — the market-cap-independent guard ───────────────
 def test_equity_with_absurd_unit_price_is_excluded(db_conn):
     """Peab-shaped: FI put a total in `Pris`. No market cap needed to catch it."""
     row, s = _classify_one(db_conn, valuta="SEK", volym="27993250", pris="240741950",

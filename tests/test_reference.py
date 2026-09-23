@@ -1,4 +1,4 @@
-"""Phase 5 — reference pipeline (§7). HTTP is mocked; no network."""
+"""Phase 5 — reference pipeline. HTTP is mocked; no network."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ def test_figi_transport_error_writes_no_negative_row(db_conn, sample_export_byte
     ).fetchone()[0] == 0
 
 
-# ── company entity (§7.2) ─────────────────────────────────────────────────
+# ── company entity ────────────────────────────────────────────────────────
 def test_display_name_prefers_recent_then_frequent(db_conn):
     def row(name, txdate):
         f = {n: "" for n in fi.FIELD_NAMES}
@@ -220,7 +220,7 @@ def test_primary_isin_prefers_aktie_but_falls_back(db_conn, sample_export_bytes)
             "SELECT COUNT(*) FROM transaction_norm WHERE lei = ? AND isin = ?",
             (r["lei"], r["primary_isin"]),
         ).fetchone()[0] > 0
-        # and if the LEI has any Aktie ISIN, the primary must be one of them (§7.2.1)
+        # and if the LEI has any Aktie ISIN, the primary must be one of them
         has_aktie = db_conn.execute(
             "SELECT COUNT(*) FROM transaction_norm WHERE lei = ? "
             "AND instrument_type = 'Aktie' AND isin <> ''", (r["lei"],),
@@ -238,7 +238,7 @@ def test_name_variants_kept_for_search(db_conn, sample_export_bytes):
     assert s.name_variants >= s.companies
 
 
-# ── market caps (§7.4) ────────────────────────────────────────────────────
+# ── market caps ───────────────────────────────────────────────────────────
 class DictProvider:
     def __init__(self, name, caps):
         self.name = name

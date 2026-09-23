@@ -1,11 +1,11 @@
-"""Phase 6 — dump the read layer to static JSON (§9).
+"""Phase 6 — dump the read layer to static JSON.
 
 Every file is produced by calling a :mod:`insynshandel.reads` function and
 serializing its Pydantic model (:mod:`insynshandel.schemas`).
 
     dist/meta.json
-    dist/leaderboard-{30d,90d,365d,all}.json     (complete, UNSORTED — §8.2)
-    dist/companies.json                          (lei, name, ticker — no pdmr, §8.1)
+    dist/leaderboard-{30d,90d,365d,all}.json     (complete, UNSORTED)
+    dist/companies.json                          (lei, name, ticker — no pdmr)
     dist/company/{lei}.json                      (detail + recent tx, capped)
     dist/data-quality.json
 """
@@ -55,7 +55,7 @@ def export(conn: sqlite3.Connection, out_dir: Path | str) -> ExportSummary:
     for period in config.EXPORT_PERIODS:
         lb = reads.leaderboard(conn, period)
         _write(out / f"leaderboard-{period}.json", lb, s)
-        # guard: the 0 sentinel must never escape market_cap_current (§6.4).
+        # guard: the 0 sentinel must never escape market_cap_current.
         # `pct_of_mcap < 0` was part of this test until 2026-09-09 — wrongly: the
         # SQL already requires market_cap_sek > 0, so a negative pct means only
         # net_value_sek < 0, i.e. a company whose insiders were net sellers.

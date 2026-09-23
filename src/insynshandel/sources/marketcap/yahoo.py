@@ -1,7 +1,7 @@
-"""YahooProvider — `yfinance`, the default (§7.4).
+"""YahooProvider — `yfinance`, the default.
 
-`fetch()` never raises. Keeps the legacy `marketCap.py` shape: a
-`ThreadPoolExecutor(max_workers=5)` and the 404/429/timeout error taxonomy.
+`fetch()` never raises. Uses a `ThreadPoolExecutor(max_workers=5)` and the
+404/429/timeout error taxonomy.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class YahooProvider:
     def symbol_for(self, company: Company) -> str | None:
         if not company.raw_ticker:
             return None
-        # Yahoo/Stockholm string shaping lives here, not in shared code (§7.4.2).
+        # Yahoo/Stockholm string shaping lives here, not in shared code.
         return format_ticker(company.raw_ticker, company.display_name or "")
 
     def _one(self, company: Company) -> tuple[MarketCapQuote | None, FetchFailure | None]:
@@ -67,7 +67,7 @@ class YahooProvider:
         done = 0
         with ThreadPoolExecutor(max_workers=5) as pool:
             # ordered map, not as_completed: a wedged company freezes the counter,
-            # which is exactly the signal yfinance hangs need (§7.4).
+            # which is exactly the signal yfinance hangs need.
             for company, (quote, failure) in zip(
                 companies, pool.map(self._one, companies), strict=True
             ):

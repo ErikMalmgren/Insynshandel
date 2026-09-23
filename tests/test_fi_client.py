@@ -1,4 +1,4 @@
-"""Phase 1 parsing contract — hermetic, no network (§4.1, §11.4)."""
+"""Phase 1 parsing contract — hermetic, no network."""
 
 from __future__ import annotations
 

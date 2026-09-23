@@ -1,10 +1,10 @@
-"""Phase 5 — reference data pipeline (§7). Independent of ingest; a failure here
+"""Phase 5 — reference data pipeline. Independent of ingest; a failure here
 must never leave ``transaction_norm`` half-built.
 
-* :func:`fx` — Riksbank SWEA rates into ``fx_rate`` (§6.3.1).
-* :func:`figi` — OpenFIGI ISIN→ticker into ``figi_lookup``, unknowns only (§7.1.1).
-* :func:`build_companies` — the LEI-keyed ``company`` entity + name variants (§7.2).
-* :func:`marketcaps` — pluggable providers append ``market_cap`` snapshots (§7.4).
+* :func:`fx` — Riksbank SWEA rates into ``fx_rate``.
+* :func:`figi` — OpenFIGI ISIN→ticker into ``figi_lookup``, unknowns only.
+* :func:`build_companies` — the LEI-keyed ``company`` entity + name variants.
+* :func:`marketcaps` — pluggable providers append ``market_cap`` snapshots.
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ class FigiSummary:
 
 # (done, total, live summary) — fired after every ISIN, transport errors included.
 # OpenFIGI is one request per ISIN at 2.4 s spacing unauthenticated, so a full run
-# is ~an hour; the CLI passes a printer so the terminal is not silent (§7.1.1).
+# is ~an hour; the CLI passes a printer so the terminal is not silent.
 FigiProgress = Callable[[int, int, FigiSummary], None]
 
 
@@ -152,7 +152,7 @@ def figi(
     return s
 
 
-# ── company entity (§7.2) ──────────────────────────────────────────────────
+# ── company entity ─────────────────────────────────────────────────────────
 _DISPLAY_NAME = """
 SELECT issuer_name FROM transaction_norm
  WHERE lei = :lei AND transaction_date >= date(:today, '-12 months')
@@ -234,7 +234,7 @@ def build_companies(conn: sqlite3.Connection) -> CompanySummary:
     return s
 
 
-# ── market caps (§7.4) ─────────────────────────────────────────────────────
+# ── market caps ────────────────────────────────────────────────────────────
 @dataclass
 class MarketCapSummary:
     attempted: int = 0

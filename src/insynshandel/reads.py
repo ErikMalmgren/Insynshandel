@@ -3,7 +3,7 @@ connection and returns a :mod:`schemas` model; ``export_static.py`` serializes
 it to one JSON file.
 
 `pct_of_mcap` and `market_cap` are read **through `market_cap_current`** so the
-0 sentinel is already SQL ``NULL`` before any arithmetic (§6.4). Never divide a
+0 sentinel is already SQL ``NULL`` before any arithmetic. Never divide a
 raw `market_cap` in Python here.
 """
 
@@ -135,14 +135,14 @@ def leaderboard(conn: sqlite3.Connection, period: str) -> schemas.Leaderboard:
         period_start=span["period_start"] if span else "",
         period_end=span["period_end"] if span else "",
         count=len(entries),
-        entries=entries,   # UNSORTED — the client sorts (§8.2)
+        entries=entries,   # UNSORTED — the client sorts
         computed_at=_iso_now(),
     )
 
 
 # ── companies.json ─────────────────────────────────────────────────────────
 def company_index(conn: sqlite3.Connection) -> schemas.CompanyIndex:
-    """Complete company index (§8.2 — the client sorts and filters)."""
+    """Complete company index (the client sorts and filters)."""
     rows = conn.execute(
         "SELECT lei, display_name, raw_ticker FROM company ORDER BY display_name"
     ).fetchall()
@@ -160,7 +160,7 @@ def company_index(conn: sqlite3.Connection) -> schemas.CompanyIndex:
 
 
 # ── company/{lei}.json ─────────────────────────────────────────────────────
-# rows for a company, following any issuer_alias merge (§7.2.3)
+# rows for a company, following any issuer_alias merge
 _TX_FROM = (
     "FROM transaction_norm WHERE COALESCE("
     "(SELECT canonical_lei FROM issuer_alias WHERE alias_lei = transaction_norm.lei), "

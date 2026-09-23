@@ -1,4 +1,4 @@
-"""Phase 2 — transaction_norm rebuild from raw_live (§5). Hermetic."""
+"""Phase 2 — transaction_norm rebuild from raw_live. Hermetic."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def test_required_fields_never_null(normalized):
 
 
 def test_missing_lei_is_carried_through_not_nulled(normalized):
-    """2016-2017 rows lack a LEI (inv 9/12 overstate coverage). '' not NULL,
+    """Many 2016-2017 rows lack a LEI. '' not NULL,
     counted as a statistic, never a hard failure."""
     conn, s = normalized
     nulls = conn.execute(
@@ -172,6 +172,6 @@ def test_full_rebuild_is_idempotent_and_reflects_deletions(db_conn, sample_bytes
 def test_reviderad_rows_are_normalized_but_marked(normalized):
     conn, _ = normalized
     # raw keeps Reviderad/Makulerad rows; normalize carries status through so
-    # aggregate (§6.2 rule 1) can exclude them
+    # aggregate can exclude them
     statuses = {r["status"] for r in conn.execute("SELECT DISTINCT status FROM transaction_norm")}
     assert "Reviderad" in statuses

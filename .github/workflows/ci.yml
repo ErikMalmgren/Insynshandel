@@ -1,6 +1,5 @@
-# Hermetic checks — no network, runs on every push and PR.
-# (Beyond the plan's repo layout, which lists only ingest.yml. 15 lines that
-#  catch a broken uv.lock or a lint/test regression before it reaches main.)
+# Hermetic checks — no network, runs on every push and PR. Catches a broken
+# uv.lock or a lint/test regression before it reaches main.
 name: ci
 
 on:

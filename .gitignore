@@ -6,3 +6,7 @@ data/insynshandel.db*
 !tests/fixtures/insyn_sample.csv
 
 .claude/settings.local.json
+
+# build outputs (export-static, local site preview)
+dist/
+site/

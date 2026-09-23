@@ -1,3 +1,3 @@
-# Read directly by ManualProvider (§7.4.1) — not loaded into a table.
+# Read directly by ManualProvider — not loaded into a table.
 # One row per company no automated source can price.
 lei,market_cap,currency,as_of,note

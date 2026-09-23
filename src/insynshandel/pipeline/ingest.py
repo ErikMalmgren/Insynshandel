@@ -1,12 +1,11 @@
 """Phase 1 — fetch a publication-date range and *diff* it into ``raw_transaction``.
 
-One code path for every mode (§4.3). ``backfill``, ``recent`` and ``gaps`` differ
+One code path for every mode. ``backfill``, ``recent`` and ``gaps`` differ
 only in the date range and whether already-covered seed windows are skipped.
 
-The write path is a diff (§4.5): for each leaf window, compare the fetched
+The write path is a diff: for each leaf window, compare the fetched
 ``(row_hash, ordinal)`` set against the live rows in that *leaf's* pub_date
-range and write only the delta. A quiet tick inserts 0 and supersedes 0
-(CLAUDE.md invariant 4).
+range and write only the delta. A quiet tick inserts 0 and supersedes 0.
 """
 
 from __future__ import annotations
@@ -85,8 +84,8 @@ def write_leaf(
     """Diff one leaf window into the DB in a single ``BEGIN IMMEDIATE`` txn.
 
     Returns ``(rows_inserted, rows_superseded)``. When ``leaf.truncated`` the
-    supersede step is skipped entirely and no ``coverage_day`` row is written
-    (§4.5.4, §4.7): a capped window did not see everything.
+    supersede step is skipped entirely and no ``coverage_day`` row is written:
+    a capped window did not see everything.
     """
     now = now or config.now_local_iso()
     f, t = leaf.window_from.isoformat(), leaf.window_to.isoformat()
@@ -206,7 +205,7 @@ def run_ingest(
     return summary
 
 
-# ── Mode wrappers (§4.3) ────────────────────────────────────────────────────
+# ── Mode wrappers ───────────────────────────────────────────────────────────
 def backfill(
     conn: sqlite3.Connection, client: fi.FIClient, *, start: date | None = None,
     end: date | None = None,

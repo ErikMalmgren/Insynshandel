@@ -1,4 +1,4 @@
-"""format_ticker — ported Yahoo/Stockholm symbol shaping (§7.3)."""
+"""format_ticker — ported Yahoo/Stockholm symbol shaping."""
 
 from __future__ import annotations
 

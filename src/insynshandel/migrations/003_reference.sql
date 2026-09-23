@@ -1,12 +1,12 @@
--- Phase 5 — reference data (§7.1). Independent pipeline: a failure here must
+-- Phase 5 — reference data. Independent pipeline: a failure here must
 -- never block ingest. All identity is provider-NEUTRAL; each MarketCapProvider
--- derives its own symbol format (§7.4.2).
+-- derives its own symbol format.
 
 -- Provider-neutral company entity, keyed on LEI.
 CREATE TABLE company (
   lei           TEXT PRIMARY KEY,
-  display_name  TEXT,          -- canonical, recency-then-frequency (§7.2)
-  primary_isin  TEXT,          -- derived from FI's own 'Aktie' rows (§7.2.1)
+  display_name  TEXT,          -- canonical, recency-then-frequency
+  primary_isin  TEXT,          -- derived from FI's own 'Aktie' rows
   raw_ticker    TEXT,          -- OpenFIGI verbatim, e.g. 'INVE B' — NOT 'INVE-B.ST'
   mic_code      TEXT,          -- e.g. 'XSTO'
   exch_code     TEXT,          -- e.g. 'SS'
@@ -15,9 +15,9 @@ CREATE TABLE company (
 );
 
 -- Manual symbol overrides. provider = '' means "applies to every provider"
--- (§7.1 wrote `COALESCE(provider,'')` in the PK, which SQLite rejects as an
--- expression — an empty-string default is the same thing without the expr).
--- symbol '' (with a note) = "checked, this company has no symbol" (§7.4.2).
+-- (`COALESCE(provider,'')` in the PK would be an expression, which SQLite
+-- rejects — an empty-string default is the same thing without the expr).
+-- symbol '' (with a note) = "checked, this company has no symbol".
 CREATE TABLE ticker_override (
   lei      TEXT NOT NULL,
   provider TEXT NOT NULL DEFAULT '',
@@ -35,7 +35,7 @@ CREATE TABLE company_name_variant (
   PRIMARY KEY (lei, name)
 );
 
--- Appended, never overwritten. Aggregates join to MAX(as_of). 0 = unknown (§6.4).
+-- Appended, never overwritten. Aggregates join to MAX(as_of). 0 = unknown.
 CREATE TABLE market_cap (
   lei        TEXT NOT NULL,
   as_of      TEXT NOT NULL,      -- YYYY-MM-DD
@@ -47,7 +47,7 @@ CREATE TABLE market_cap (
 );
 
 -- Riksbank SWEA daily rates. Business days only — gaps on weekends/holidays are
--- NOT filled here; forward-fill at read time (§6.3.1).
+-- NOT filled here; forward-fill at read time.
 CREATE TABLE fx_rate (
   currency     TEXT NOT NULL,     -- 'USD', 'EUR', 'GBP', 'CAD', ...
   rate_date    TEXT NOT NULL,     -- YYYY-MM-DD
@@ -56,7 +56,7 @@ CREATE TABLE fx_rate (
   PRIMARY KEY (currency, rate_date)
 );
 
--- Every OpenFIGI answer we have ever received, including the negatives (§7.1.1).
+-- Every OpenFIGI answer we have ever received, including the negatives.
 CREATE TABLE figi_lookup (
   isin         TEXT PRIMARY KEY,
   ticker       TEXT,              -- NULL = asked, no usable answer
@@ -72,7 +72,7 @@ CREATE TABLE figi_lookup (
 -- ── Seed-file tables (reloaded from data/seed/*.csv on every `db migrate` and
 --    every `insyn aggregate` — editing the CSV + re-running is the only lever) ──
 
--- Karaktär → sign / counted (§6.1). An unmapped value fails the build.
+-- Karaktär → sign / counted. An unmapped value fails the build.
 CREATE TABLE nature_map (
   karaktar TEXT PRIMARY KEY,
   sign     INTEGER NOT NULL,
@@ -81,7 +81,7 @@ CREATE TABLE nature_map (
   note     TEXT
 );
 
--- Confirmed LEI merges (§7.2.3). alias_lei folds into canonical_lei at
+-- Confirmed LEI merges. alias_lei folds into canonical_lei at
 -- aggregation time. Populated by hand from backfill evidence, never a ratio.
 CREATE TABLE issuer_alias (
   alias_lei     TEXT PRIMARY KEY,
@@ -89,7 +89,7 @@ CREATE TABLE issuer_alias (
   note          TEXT
 );
 
--- ── The market-cap guard (§6.4). NOTHING reads `market_cap` directly. ──
+-- ── The market-cap guard. NOTHING reads `market_cap` directly. ─────────
 -- The CASE has no ELSE, so the 0 sentinel becomes SQL NULL before it can reach
 -- arithmetic: net / NULL is NULL, SUM() skips it, comparisons are never true.
 CREATE VIEW market_cap_current AS

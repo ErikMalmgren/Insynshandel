@@ -1,4 +1,4 @@
-"""Pluggable market-cap providers (§7.4). Selection is `config.MARKETCAP_PROVIDERS`."""
+"""Pluggable market-cap providers. Selection is `config.MARKETCAP_PROVIDERS`."""
 
 from .base import (
     Company,

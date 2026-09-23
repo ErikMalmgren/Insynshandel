@@ -1,15 +1,15 @@
 """Phase 3 — classify every ``transaction_norm`` row, then build the aggregates.
 
-Two passes, in strict order (§6.2):
+Two passes, in strict order:
 
 1. **classify** — per row, in one Python loop: value it in SEK (FX forward-fill),
    assign ``sign`` from ``nature_map``, decide ``verification`` against the
-   issuer's market cap, then evaluate the ordered §6.2 filter and record either
+   issuer's market cap, then evaluate the ordered filter and record either
    ``is_counted = 1`` or the first ``exclude_reason`` that fired.
 2. **aggregate** — pure SQL ``GROUP BY`` canonical LEI over the counted rows,
    into ``agg_company_period`` for the precomputed windows.
 
-An unmapped ``Karaktär`` fails the whole thing (§6.1.2).
+An unmapped ``Karaktär`` fails the whole thing.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from .. import config, db
 from ..db import immediate
 from .fx import FxTable
 
-# The ordered §6.2 filter is the if/elif chain in classify(); the FIRST match
+# The ordered filter is the if/elif chain in classify(); the FIRST match
 # wins, so its order is the contract. For reference / doctor:
 #   no_lei -> not_current -> nature_not_counted -> volume_unit
 #   -> unparseable_number -> no_fx_series / no_fx_rate
@@ -40,7 +40,7 @@ EXCLUDE_REASONS = (
 
 
 def _implausible_price(row, fx_rate: float, gross_sek: float) -> bool:
-    """FI wrote a total amount where a unit price belongs (§6.2.1).
+    """FI wrote a total amount where a unit price belongs.
 
     Two arms, both needed. The type gate alone misses a bond whose nominal was
     written into both columns; `volume == price` alone misses an equity row
@@ -110,7 +110,7 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
 
     s.unmapped_natures = _unmapped_natures(conn)
     if s.unmapped_natures:
-        return s  # caller prints and exits non-zero (§6.1.2)
+        return s  # caller prints and exits non-zero
 
     nature = {
         r["karaktar"]: (r["sign"], r["counted"])
@@ -154,7 +154,7 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
         else:
             verification = "ok"
 
-        # ── ordered §6.2 filter — first hit wins ──
+        # ── ordered filter — first hit wins ───────
         reason: str | None = None
         if not r["lei"]:
             reason = "no_lei"

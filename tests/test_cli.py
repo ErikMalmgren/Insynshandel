@@ -1,4 +1,4 @@
-"""CLI-only helpers: the progress meter the long refdata steps print (§7.1.1)."""
+"""CLI-only helpers: the progress meter the long refdata steps print."""
 
 from __future__ import annotations
 

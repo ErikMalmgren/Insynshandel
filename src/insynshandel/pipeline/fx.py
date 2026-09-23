@@ -1,4 +1,4 @@
-"""Forward-filled FX lookup (§6.3.1).
+"""Forward-filled FX lookup.
 
 `fx_rate` holds business-day rates only. A transaction on a weekend or holiday
 converts at the **most recent earlier** business day's rate — never interpolated,

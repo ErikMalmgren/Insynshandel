@@ -1,12 +1,10 @@
-"""OpenFIGI — ISIN → exchange ticker (§7.3).
+"""OpenFIGI — ISIN → exchange ticker.
 
 Free, 25 requests/minute unauthenticated (2.4 s spacing); set ``OPENFIGI_API_KEY``
-to raise it. Only ever queried for ISINs with no ``figi_lookup`` row (§7.1.1).
+to raise it. Only ever queried for ISINs with no ``figi_lookup`` row.
 
-``format_ticker`` is ported from the legacy ``test_find_unknown.py`` —
-Yahoo-specific string shaping (``.ST`` suffix, SDB handling, A/B share classes).
-It lives here for now; when a second provider lands it moves into ``yahoo.py``
-(§7.4.2).
+``format_ticker`` is Yahoo-specific string shaping (``.ST`` suffix, SDB handling, A/B share classes).
+It lives here for now; when a second provider lands it moves into ``yahoo.py``.
 """
 
 from __future__ import annotations
@@ -93,7 +91,7 @@ class OpenFIGIClient:
 
     def map_isin(self, isin: str) -> FigiResult:
         """Resolve one ISIN. A network failure raises; 'no match' returns a
-        FigiResult with ``ticker=None`` (a cacheable negative, §7.1.1)."""
+        FigiResult with ``ticker=None`` (a cacheable negative)."""
         self._space()
         body = [{"idType": "ID_ISIN", "idValue": isin, "micCode": PREFERRED_MIC}]
         resp = self.session.post(OPENFIGI_URL, json=body,

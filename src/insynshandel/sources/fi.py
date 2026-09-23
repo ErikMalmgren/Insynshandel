@@ -7,8 +7,9 @@ Two concerns, deliberately separable for testing:
 * HTTP — :class:`FIClient` — politeness spacing, retry/backoff, a per-run
   request budget.
 
-Verified source facts live in ``plan/01-ingest.md`` §4.1. The parser trusts
-none of them silently: a wrong field count or a changed header raises.
+The verified source facts (encoding, delimiter, field count, row cap) are in
+:mod:`insynshandel.config`. The parser trusts none of them silently: a wrong
+field count or a changed header raises.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import requests
 
 from .. import config
 
-# ── Column contract (§4.1) ──────────────────────────────────────────────────
+# ── Column contract ─────────────────────────────────────────────────────────
 # DB column name  ->  exact CSV header label, in file order. 22 real columns;
 # the export appends a 23rd empty field (trailing ';').
 COLUMNS: tuple[tuple[str, str], ...] = (
@@ -61,7 +62,7 @@ ONE_DAY = timedelta(days=1)
 
 
 class FormatChangedError(RuntimeError):
-    """The export no longer matches the verified contract in §4.1. Fail loud."""
+    """The export no longer matches the verified column contract. Fail loud."""
 
 
 class RequestBudgetExceeded(RuntimeError):
@@ -94,7 +95,7 @@ def row_hash(values: list[str]) -> str:
     """sha256 hex of the 22 verbatim fields joined by ``\\x1f``.
 
     Covers ``status`` too, so a ``Aktuell -> Reviderad`` flip surfaces as
-    supersede + insert rather than a silent in-place edit (§4.4). Changing this
+    supersede + insert rather than a silent in-place edit. Changing this
     function after a backfill re-supersedes every row — pinned by a test.
     """
     if len(values) != N_REAL_FIELDS:
@@ -105,7 +106,7 @@ def row_hash(values: list[str]) -> str:
 def parse_csv(data: bytes) -> list[list[str]]:
     """Decode the UTF-16LE export and return one 22-field list per data row.
 
-    Uses ``csv.reader`` (RFC 4180) — never ``line.split(';')`` (§4.1.1).
+    Uses ``csv.reader`` (RFC 4180) — never ``line.split(';')``.
     Raises :class:`FormatChangedError` on a bad header or any row whose field
     count is not exactly ``config.FI_FIELD_COUNT`` (23).
     """
@@ -132,7 +133,7 @@ def parse_csv(data: bytes) -> list[list[str]]:
 def assign_ordinals(field_rows: list[list[str]]) -> list[ParsedRow]:
     """Hash each row and number exact duplicates 0, 1, 2… in returned order.
 
-    The source genuinely repeats some rows byte-for-byte (§4.5.1); ``ordinal``
+    The source genuinely repeats some rows byte-for-byte; ``ordinal``
     preserves that multiplicity instead of collapsing it.
     """
     seen: dict[str, int] = {}
@@ -167,11 +168,11 @@ def iter_leaf_windows(
     window_to: date,
     get_rows: Callable[[date, date], list[ParsedRow]],
 ) -> Iterator[Leaf]:
-    """Bisect on the 1000-row cap; yield only leaf windows (§4.2).
+    """Bisect on the 1000-row cap; yield only leaf windows.
 
     ``get_rows`` performs one fetch. A capped window's rows are never yielded —
     only its non-capped halves are. A single day that still caps is yielded with
-    ``truncated=True`` and must be insert-only downstream (§4.5.4).
+    ``truncated=True`` and must be insert-only downstream.
     """
     rows = get_rows(window_from, window_to)
     if len(rows) < config.FI_ROW_CAP:

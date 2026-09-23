@@ -1,4 +1,4 @@
 # canonical_lei wins; alias_lei folds into it. Fill in from evidence after the
-# backfill (§7.2.3) — never from a sample ratio. Comment lines (#) and blank
+# backfill — never from a sample ratio. Comment lines (#) and blank
 # lines are ignored by the loader.
 alias_lei,canonical_lei,note

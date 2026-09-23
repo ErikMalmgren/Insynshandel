@@ -1,4 +1,4 @@
-"""Phase 6 — reads (§8.2) + static export (§9). Hermetic."""
+"""Phase 6 — reads + static export. Hermetic."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_leaderboard_is_complete_and_unsorted(built):
         "FROM transaction_norm WHERE is_counted = 1"
     ).fetchone()[0]
     assert lb.count == n_companies              # every active company, no limit
-    # §8.2: leaderboard sorting lives on the client, so the shared function must
+    # Leaderboard sorting lives on the client, so the shared function must
     # expose no server-side sort/paginate knob — assert that against the signature.
     import inspect
 
@@ -149,7 +149,7 @@ def test_export_writes_the_documented_file_set(built, tmp_path):
     assert {"meta.json", "companies.json", "data-quality.json",
             "leaderboard-30d.json", "leaderboard-90d.json",
             "leaderboard-365d.json", "leaderboard-all.json"} <= names
-    assert "leaderboard-ytd.json" not in names           # §9 file list omits ytd
+    assert "leaderboard-ytd.json" not in names           # the export has no ytd file
     assert any(n.startswith("company/") for n in names)
     assert not s.warnings
 
@@ -176,7 +176,7 @@ def test_export_is_deterministic(built, tmp_path):
 
 def test_export_total_size_is_small(built, tmp_path):
     s = export_static.export(built, tmp_path / "dist")
-    assert s.bytes < 5_000_000  # "a few MB, not tens" (§9)
+    assert s.bytes < 5_000_000  # "a few MB, not tens"
 
 
 def test_export_flags_a_market_cap_zero_leak(built, tmp_path, monkeypatch):

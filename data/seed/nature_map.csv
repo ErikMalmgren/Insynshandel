@@ -1,8 +1,8 @@
 karaktar,sign,counted,category,note
 Förvärv,1,1,market,Open-market or negotiated acquisition
 Avyttring,-1,1,market,Disposal
-Teckning,0,0,subscription,Rights-issue subscription — excluded; mostly BTA/BTU interim paper (§6.1.1)
-Tilldelning,0,0,compensation,54% aktieprogram and 45% priced at 0 — mostly free awards (§6.1.1)
+Teckning,0,0,subscription,Rights-issue subscription — excluded; mostly BTA/BTU interim paper
+Tilldelning,0,0,compensation,54% aktieprogram and 45% priced at 0 — mostly free awards
 Interntransaktion – Förvärv,0,0,internal,Transfer between own/related accounts
 Interntransaktion – Avyttring,0,0,internal,Transfer between own/related accounts
 Koncernintern överföring förvärv,0,0,internal,Intra-group transfer (older wording)
