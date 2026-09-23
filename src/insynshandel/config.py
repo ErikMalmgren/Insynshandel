@@ -43,14 +43,14 @@ def now_local_iso() -> str:
     return datetime.now(FI_TZ).isoformat(timespec="seconds")
 
 
-# ── Politeness toward FI ─────────────────────────────────────────────────────
+# ── Politeness ────────────────────────────────────────────
 REQUEST_SPACING_S = float(os.environ.get("INSYN_REQUEST_SPACING_S", "3.0"))
 REQUEST_TIMEOUT_S = float(os.environ.get("INSYN_REQUEST_TIMEOUT_S", "60"))
 MAX_REQUESTS_PER_RUN = int(os.environ.get("INSYN_MAX_REQUESTS_PER_RUN", "600"))
 HTTP_MAX_RETRIES = 4              # exponential backoff on 5xx / connection reset
 USER_AGENT = os.environ.get(
     "INSYN_USER_AGENT",
-    "Insynshandel/0.1 (+https://github.com/erikm/Insynshandel; e.malmis@gmail.com)",
+    "Insynshandel/0.1 (+https://github.com/ErikMalmgren/Insynshandel; erik@malmgren.dev)",
 )
 
 # ── Windowing ───────────────────────────────────────────────────────────────
