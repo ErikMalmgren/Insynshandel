@@ -113,22 +113,6 @@ AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK = 1_000_000_000.0
 # ── Aggregate windows (§6.5) — anchored to config.today(), not MAX(tx_date) ──
 AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")
 
-# ── Static export / API (§9) ────────────────────────────────────────────────
+# ── Static export (§9) ──────────────────────────────────────────────────────
 EXPORT_PERIODS = ("30d", "90d", "365d", "all")   # §9 file list — no ytd file
 COMPANY_TX_LIMIT = 50                             # recent transactions per company detail
-API_PAGE_DEFAULT = 50
-API_PAGE_MAX = 500
-
-# ── API (§8, plan/04-api.md) ────────────────────────────────────────────────
-# CORS: the frontend calls this from another origin (§1.2). Never "*" — list the
-# exact origins. The GitHub Pages hostname is unconfirmed until deploy; override
-# with INSYN_CORS_ORIGINS (comma-separated) once it is known.
-API_CORS_ORIGINS = [
-    o.strip()
-    for o in os.environ.get(
-        "INSYN_CORS_ORIGINS", "https://erikmalmgren.github.io"
-    ).split(",")
-    if o.strip()
-]
-API_HOST = os.environ.get("INSYN_API_HOST", "127.0.0.1")
-API_PORT = int(os.environ.get("INSYN_API_PORT", "8000"))

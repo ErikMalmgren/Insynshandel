@@ -36,6 +36,10 @@
 
 ### 1.1 The two read paths — build both
 
+> **Superseded 2026-09-23:** the API (phase 4) was removed. Static JSON is the
+> only read path; `reads.py` + `schemas.py` feed `export_static.py` alone. §1.1
+> and §1.2 are kept as the record of why both were planned.
+
 The API and the static JSON dump **share the same serializers**. `export_static.py`
 calls the same functions the API routes call and writes their output to files.
 This guarantees identical response shapes and costs almost nothing.

@@ -48,10 +48,9 @@ we just avoided. Take the *look*, not the machinery.
 
 ### 16.2 How the frontend and the JSON meet
 
-**Do not change `export-static --out dist/`.** `tests/test_api.py` diffs every
-API route against its `dist/` file and `doctor`'s `_static_export_checks` reads
-`companies.json` / `leaderboard-30d.json` at the export root. Moving the target
-breaks both.
+**Do not change `export-static --out dist/`.** `doctor`'s
+`_static_export_checks` reads `companies.json` / `leaderboard-30d.json` at the
+export root. Moving the target breaks it.
 
 Assemble the published artifact in the workflow instead:
 
@@ -223,7 +222,7 @@ frontend/
 
 - `site/` after the assemble step contains `index.html` **and**
   `data/meta.json`; `dist/` still contains `meta.json` at its root
-  (`tests/test_api.py` and `doctor` unchanged and green).
+  (`doctor` unchanged and green).
 - Every page loads with no console errors against a real `site/` served by
   `python3 -m http.server`.
 - A company with `market_cap: null` renders `—` in both the leaderboard and its
@@ -312,16 +311,9 @@ below):
   `overflow-wrap: anywhere`.
 - Contrast computed for every foreground/background pair used, in both schemes.
 - `npx html-validate@9` clean on all four pages.
-- **Both §9 modes checked, not just the static one.** All five URL builders in
-  `js/insyn.js` were resolved against a running `insyn serve`: `/meta`,
-  `/data-quality`, `/leaderboard?period=30d`, `/companies`,
-  `/companies/{lei}` — all 200, and the payloads are key-identical to their
-  `dist/` twins (they come from the same `reads.py`). Note the paths are *not*
-  parallel: the static tree has `company/<LEI>.json`, the API has
-  `/companies/{lei}`. That asymmetry is why the mapping is a switch in one
-  place rather than string concatenation at each call site. To use the API
-  mode, set `window.API_BASE` to an absolute URL before the module loads;
-  anything not matching `^https?://` is treated as a static tree.
+- The URL builders in `js/insyn.js` were also checked against a running API
+  (`insyn serve`). That mode, and the switch in `url.*` that picked it, were
+  removed with the API on 2026-09-23; `url.*` now maps only the static tree.
 
 `uv run insyn doctor` (21 pass) and `pytest` (148 pass) are unchanged by this
 phase — nothing under `src/` was touched.

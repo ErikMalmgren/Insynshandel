@@ -1,5 +1,5 @@
-"""Pydantic response models — the single schema for both the API and the static
-export (§8.2). No database access here.
+"""Pydantic models — the schema of every static JSON file (§9). No database
+access here.
 
 Money fields are plain SEK numbers, never formatted (§6.3). Missing market cap is
 ``None`` → serialized ``null``, never ``0`` (§6.4) — hence ``float | None`` with
@@ -139,38 +139,3 @@ class DataQuality(BaseModel):
     outliers: list[DataQualityEntry]
     contested_isin_count: int
     computed_at: str
-
-
-class Transaction(BaseModel):
-    """A row in the global ``/transactions`` feed.
-
-    Deliberately flat and **without ``pdmr`` / ``position``**. §8.1 grants person
-    fields "on a company's transaction list" only; a global, server-sorted,
-    paginated feed with names attached is a person index by another name. Those
-    two fields stay on :class:`CompanyTransaction` and nowhere else. Duplicating
-    the field list rather than subclassing keeps the omission auditable.
-    """
-
-    lei: str
-    issuer_name: str
-    transaction_date: str
-    published_date: str
-    nature: str
-    sign: int | None
-    is_counted: int
-    instrument_type: str
-    instrument_name: str
-    isin: str
-    volume: float | None
-    price: float | None
-    currency: str
-    gross_value_sek: float | None
-    verification: str
-    exclude_reason: str | None
-
-
-class Paginated[T](BaseModel):
-    items: list[T]
-    total: int
-    limit: int
-    offset: int

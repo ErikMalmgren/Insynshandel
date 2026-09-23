@@ -1,18 +1,8 @@
 # Deploying Insynshandel
 
-Two independent paths (§10). Pick one; they share the same pipeline.
-
-| | Static-only | API |
-| --- | --- | --- |
-| Hosting | GitHub Pages (free) | a €4–6/mo VM or a box at home |
-| Runs | `.github/workflows/ingest.yml` | `docker compose` + a systemd timer |
-| Frontend `API_BASE` | `'./data'` | `'https://api.example.com/api/v1'` |
-| Freshness | per workflow schedule | hourly, served live |
-
-The **API path** below is untested until the first backfill lands — see the ⚠
-note in `ingest.yml` and the standing reminder about `insyn ingest backfill`.
-The static path's Pages and DNS plumbing can be wired and verified before then,
-against whatever data the working database already holds.
+One path (§10.1): `ingest.yml` runs on its cron, keeps the `db-latest` release
+current, and its `deploy` job publishes to Pages. There is no server — the API
+path (FastAPI + Docker) was removed on 2026-09-23.
 
 ---
 
@@ -23,23 +13,31 @@ go to GitHub Pages on **this** repo under the `insyn` subdomain.
 `www.malmgren.dev` stays exactly as it is and gets one link from
 `projects.html`.
 
-> **Prerequisite:** the ingest workflow has to succeed before Pages has
-> anything to publish. It currently does not — see the ⚠ header in
-> `.github/workflows/ingest.yml`. Run the backfill and seed the `db-latest`
-> release first, or disable the `schedule:` block while you build the frontend.
+Every `ingest.yml` run that passes `doctor` redeploys the site: the `ingest`
+job assembles `site/` (§16.2) and uploads it as the Pages artifact, the
+`deploy` job publishes it. A failed check stops the run before the upload, so
+bad JSON never ships — the previous deploy stays live.
 
 ### 1 — Repo and Pages
 
-- [ ] **Confirm this repo is public.** Pages on a private repo needs GitHub Pro.
-- [ ] Create `frontend/CNAME` containing exactly `insyn.malmgren.dev`. It must
-      end up **in the uploaded artifact** — that is what survives a redeploy.
-- [ ] In `.github/workflows/ingest.yml`, add to `permissions:`
-      `pages: write` and `id-token: write`.
-- [ ] Wire publish block (i): the assemble step from §16.2, then
-      `actions/upload-pages-artifact@v3` with `path: site/`, then
-      `actions/deploy-pages@v4`.
-- [ ] Settings → Pages → **Source: GitHub Actions**.
-- [ ] Run the workflow once (`workflow_dispatch`) and confirm it deploys.
+- [x] Repo is public (Pages on a private repo needs GitHub Pro).
+- [x] `ingest.yml`: assemble step, `upload-pages-artifact` (`path: site/`), and
+      a `deploy` job with `pages: write` + `id-token: write` (2026-09-22).
+- [ ] Settings → Pages → Build and deployment → **Source: GitHub Actions**.
+      Do this **before** pushing the workflow change — otherwise the next
+      scheduled run's `deploy` job fails (the ingest itself still succeeds).
+- [ ] Actions → **ingest** → Run workflow (on `main`). Success = both jobs
+      green. **Don't open the link the `deploy` job prints yet:** before the
+      custom domain is set it is `erikmalmgren.github.io/Insynshandel/`, which
+      redirects to `www.malmgren.dev` (that user site owns the domain), and the
+      frontend's root-absolute paths (`/css/…`) only work at a domain root.
+      Judge the site only on `insyn.malmgren.dev`, after step 2.
+      If `deploy` fails fetching the artifact, add `actions: read` to its
+      `permissions:`.
+
+`frontend/CNAME` is harmless but **ignored**: with an Actions-based deploy,
+GitHub takes the custom domain from Settings → Pages only (step 2 below), and
+that setting survives redeploys on its own.
 
 ### 2 — Cloudflare DNS — do these in order
 
@@ -87,44 +85,6 @@ curl -s -o /dev/null -w '%{http_code}\n' https://insyn.malmgren.dev/nope
 - Cloudflare's Scrape Shield email obfuscation is a zone-wide setting that
   already applies to `www` — irrelevant here, since this site publishes no
   addresses, but it is the same zone.
-
-## API path (Docker, one host)
-
-```sh
-git clone https://github.com/ErikMalmgren/Insynshandel.git /opt/insynshandel
-cd /opt/insynshandel
-cp .env.example .env            # set OPENFIGI_API_KEY, INSYN_CORS_ORIGINS
-
-# one-time: create the database on the volume
-docker compose run --rm cli db migrate
-docker compose run --rm cli ingest backfill      # ~30–45 min, overnight
-docker compose run --rm cli build
-
-# always-on reader
-docker compose up -d api
-
-# scheduled writer
-cp deploy/systemd/insyn-ingest.* /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now insyn-ingest.timer
-```
-
-Then put `deploy/Caddyfile` in front (or a Cloudflare/Tailscale tunnel if you
-are behind CGNAT — §10.2.1) and point it at `127.0.0.1:8000`.
-
-### Rules that matter more than the config (§10.4)
-
-1. **The DB is a host bind mount on local disk.** Not a named volume (a rebuild
-   would lose it), not a NAS share (SQLite WAL corrupts on NFS/SMB — §10.2.2).
-2. **The API connection is read-only** (`mode=ro`), so multi-worker uvicorn is
-   safe and an API bug can never take a write lock.
-3. **The ingest is single-writer.** Never run two writers against one file;
-   never run the ingest inside a uvicorn worker.
-
-### Backup
-
-`litestream replicate` the DB file to object storage (or rsync to a NAS —
-off the live disk). `VACUUM` once after the backfill.
 
 ## Post-backfill checklist
 

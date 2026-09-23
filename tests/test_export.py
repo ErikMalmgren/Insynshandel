@@ -1,14 +1,14 @@
-"""Phase 6 — shared reads (§8.2) + static export (§9). Hermetic."""
+"""Phase 6 — reads (§8.2) + static export (§9). Hermetic."""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date
 
 import pytest
 
-from insynshandel import config, export_static
-from insynshandel.api import reads
+from insynshandel import config, db, export_static, reads
 from insynshandel.pipeline import aggregate, ingest, normalize, reference
 from insynshandel.sources import fi
 from insynshandel.sources.marketcap import MarketCapQuote
@@ -47,7 +47,7 @@ class OneCapProvider:
         )
 
 
-# ── reads: the shared layer ───────────────────────────────────────────────
+# ── reads ─────────────────────────────────────────────────────────────────
 def test_meta_shape(built):
     m = reads.meta(built)
     assert m.raw_live_rows == m.norm_rows > 0
@@ -129,6 +129,20 @@ def test_company_index_carries_no_person_data(built):
 
 
 # ── export_static ─────────────────────────────────────────────────────────
+def test_export_connection_is_read_only(built, tmp_path):
+    """`insyn export-static` reads through `db.connect(read_only=True)`: reads
+    work, and any write is refused by SQLite rather than silently applied."""
+    ro = db.connect(tmp_path / "t.db", read_only=True)
+    try:
+        assert reads.meta(ro).norm_rows > 0
+        with pytest.raises(sqlite3.OperationalError):
+            ro.execute("CREATE TABLE hack (x)")
+        with pytest.raises(sqlite3.OperationalError):
+            ro.execute("UPDATE transaction_norm SET nature = 'x'")
+    finally:
+        ro.close()
+
+
 def test_export_writes_the_documented_file_set(built, tmp_path):
     s = export_static.export(built, tmp_path / "dist")
     names = {p.relative_to(s.out_dir).as_posix() for p in s.out_dir.rglob("*.json")}

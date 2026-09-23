@@ -1,8 +1,8 @@
 # Insynshandel
 
 Swedish insider-trading data (Finansinspektionen's *insynsregistret*) ingested
-into SQLite, aggregated per company, and published as static JSON plus a
-read-only API.
+into SQLite, aggregated per company, and published as static JSON to GitHub
+Pages. There is no API or server (removed 2026-09-23).
 
 **Python 3.14, pinned. Use `uv`, never `pip`.** Run everything as
 `uv run insyn <cmd>`.
@@ -19,9 +19,8 @@ loading. **Read the one file for the phase you are on — not the whole plan.**
 | 2 · normalize | `plan/02-normalize.md` | 3rd |
 | 3 · classify & aggregate | `plan/03-aggregate.md` | 4th |
 | 5 · reference data | `plan/05-refdata.md` | with phase 3 |
-| 6 · static JSON export | `plan/06-static.md` | 5th |
-| 4 · API | `plan/04-api.md` | 6th |
-| 7 · frontend (`insyn.malmgren.dev`) | `plan/07-frontend.md` | 7th |
+| 6 · static JSON export (+ §8.1, §8.2) | `plan/06-static.md` | 5th |
+| 7 · frontend (`insyn.malmgren.dev`) | `plan/07-frontend.md` | 6th |
 | — deployment | `plan/deploy.md` | last |
 | — testing, `insyn doctor` | `plan/testing.md` | throughout |
 | — rationale, rejected options | `plan/background.md` | read once |
@@ -92,9 +91,9 @@ keeps working while the data goes wrong.
 14. **Aggregate on `transaction_date`, never `published_date`.** Publication
     date only windows the fetch. (§6.5)
 
-15. **No person index, ever** — no `/persons` route, no `?pdmr=` filter, no
-    client-side name search. Names appear only on a company's transaction list.
-    (§8.1)
+15. **No person index, ever** — no person page or per-person file, no person
+    filter, no client-side name search. Names appear only on a company's
+    transaction list. (§8.1)
 
 16. **A market-cap provider failure writes no row at all** — not a `0` row. The
     previous snapshot stays latest. A degraded provider never aborts
@@ -107,7 +106,7 @@ keeps working while the data goes wrong.
 
 - Plain `sqlite3` with hand-written SQL in `src/insynshandel/migrations/*.sql`.
   No ORM.
-- The API opens SQLite **read-only**; only the ingest writes.
+- `export-static` opens SQLite **read-only**; only ingest/refdata/build write.
 - Be a polite client: 3 s between requests to marknadssok.fi.se, descriptive
   `User-Agent`, backoff on 5xx and connection resets.
 - Swedish domain terms stay in Swedish in the data layer (`karaktar`,
@@ -117,28 +116,21 @@ keeps working while the data goes wrong.
 ## Phase status
 
 - **Whole plan implemented** (see git log). Pipeline: `insyn build` =
-  normalize→refdata→aggregate. Read surface: `api/reads.py` (+ `api/schemas.py`
-  Pydantic) is the **shared layer** — `export_static.py` and the FastAPI routes
-  (`api/app.py`, `api/routes.py`, `insyn serve`) call the same functions;
-  `tests/test_api.py` diffs every route against its `dist/` file. 148 hermetic
+  normalize→refdata→aggregate. Read surface: `reads.py` returns `schemas.py`
+  Pydantic models; `export_static.py` dumps each to one JSON file. 134 hermetic
   tests.
-- **Phase 4 deviations from the plan header** (deliberate, also in the commit):
-  `/leaderboard` is `?period=` not `?from=&to=` (arbitrary windows have no
-  static twin → break parity); `/companies?q=` is a filter, no `limit`/`offset`
-  (§8.2); the global `/transactions` feed omits `pdmr`/`position` (that §8.1
-  grant is company-scoped). Query params are `extra="forbid"` models, so an
-  unknown/off-list param is a 422, not a silent ignore.
-- **Deployment** (`plan/deploy.md`): `Dockerfile` (+`.dockerignore`),
-  `docker-compose.yml`, `.env.example`, `deploy/` (Caddyfile, systemd
-  unit+timer, `ingest.sh`, runbook), `.github/workflows/` — `ci.yml` (beyond
-  the plan) and `ingest.yml`. **`ingest.yml` runs on its cron and succeeds**
+- **API removed 2026-09-23** (phase 4: FastAPI, `insyn serve`, Docker,
+  compose, Caddy, systemd). Never deployed; the static path covers the product.
+  `plan/04-api.md` is gone — §8.1/§8.2 now live in `plan/06-static.md`. Don't
+  re-add a server path without the user asking.
+- **Deployment** (`plan/deploy.md` §10.1): `deploy/README.md` (Pages + DNS
+  runbook), `.github/workflows/` — `ci.yml` (beyond the plan) and
+  `ingest.yml`. **`ingest.yml` runs on its cron and succeeds**
   (~10 min; restores + re-uploads the `db-latest` release asset), so the
   *cloud* DB is current even when the local one is stale — a local doctor
   "N missing days" FAIL is just an idle laptop. Its `deploy` job publishes
   `site/` (§16.2) to Pages → `insyn.malmgren.dev` (2026-09-22; live once Pages
-  + Cloudflare DNS are set up by hand — `deploy/README.md`). Docker uses
-  `INSYN_DATA_DIR=/data`, **not** the plan sketch's `INSYN_DB`. Docker build
-  **unverified** (no docker in this env); the API path is not deployed.
+  + Cloudflare DNS are set up by hand — `deploy/README.md`).
 - **Phase 7 frontend built** (2026-09-09, `frontend/`) — the nine files of
   §16.8, no deps. As-built notes + how it was verified: `plan/07-frontend.md`
   §16.9.
@@ -219,7 +211,6 @@ uv run insyn ingest recent --days 7       # hourly
 uv run insyn ingest gaps --dry-run        # heal an outage
 uv run insyn build                        # normalize -> refdata -> aggregate
 uv run insyn export-static --out dist/
-uv run insyn serve
 uv run insyn doctor                       # acceptance checks
 ```
 

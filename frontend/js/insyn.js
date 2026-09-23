@@ -16,33 +16,23 @@
 
 /* ---------- where the data comes from ----------
  *
- * §9: the frontend reads window.API_BASE. Two modes, same fetch code:
- *
- *   './data'                          static JSON next to the pages, no CORS
- *   'https://api.example.com/api/v1'  the live FastAPI
- *
- * They are not the same URL *shape* — the static export is a tree of files and
- * the API is routes with query strings — so the mapping lives here, once, and
- * every caller asks for a resource rather than building a path.
+ * §9: static JSON next to the pages, under window.API_BASE (default './data',
+ * which is where the ingest workflow's assemble step puts the export). The
+ * file layout is mapped here, once, so every caller asks for a resource rather
+ * than building a path.
  */
 
 const API_BASE = (typeof window !== 'undefined' && typeof window.API_BASE === 'string'
     && window.API_BASE) || './data';
 
-/* Anything absolute is the API; anything relative is the static export. */
-const STATIC = !/^https?:\/\//i.test(API_BASE);
-
 const q = encodeURIComponent;
 
 export const url = {
-    meta:        ()    => STATIC ? `${API_BASE}/meta.json` : `${API_BASE}/meta`,
-    dataQuality: ()    => STATIC ? `${API_BASE}/data-quality.json`
-                                 : `${API_BASE}/data-quality`,
-    leaderboard: (p)   => STATIC ? `${API_BASE}/leaderboard-${q(p)}.json`
-                                 : `${API_BASE}/leaderboard?period=${q(p)}`,
-    companies:   ()    => STATIC ? `${API_BASE}/companies.json` : `${API_BASE}/companies`,
-    company:     (lei) => STATIC ? `${API_BASE}/company/${q(lei)}.json`
-                                 : `${API_BASE}/companies/${q(lei)}`,
+    meta:        ()    => `${API_BASE}/meta.json`,
+    dataQuality: ()    => `${API_BASE}/data-quality.json`,
+    leaderboard: (p)   => `${API_BASE}/leaderboard-${q(p)}.json`,
+    companies:   ()    => `${API_BASE}/companies.json`,
+    company:     (lei) => `${API_BASE}/company/${q(lei)}.json`,
 };
 
 /* ---------- fetching ----------

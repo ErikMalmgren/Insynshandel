@@ -2,7 +2,7 @@
 
 Implemented: ``db migrate``, ``ingest {backfill,recent,gaps}``, ``normalize``,
 ``refdata {fx,figi,marketcaps}``, ``aggregate``, ``build``, ``export-static``,
-``serve``, ``doctor``.
+``doctor``.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from .pipeline import aggregate, ingest, normalize, reference
 class _Progress:
     """A one-line, self-erasing progress meter for the long refdata steps.
 
-    On a TTY it rewrites a single line at most 4x/s; piped to a log (cron,
-    systemd) it emits a plain line at most every 30 s so a full FIGI run costs
+    On a TTY it rewrites a single line at most 4x/s; piped to a log (CI,
+    cron) it emits a plain line at most every 30 s so a full FIGI run costs
     ~2 lines/minute instead of one per ISIN. ETA is measured, not derived from
     the client's request spacing.
     """
@@ -355,30 +355,6 @@ def _cmd_export_static(args: argparse.Namespace) -> int:
     return 1 if s.warnings else 0
 
 
-def _cmd_serve(args: argparse.Namespace) -> int:
-    import uvicorn
-
-    if not config.DB_PATH.exists():
-        print(f"no database at {config.DB_PATH} — run `insyn build` first", file=sys.stderr)
-        return 1
-    print(f"serve: http://{args.host}:{args.port}  (db {config.DB_PATH}, read-only)")
-    # >1 worker is safe here — every request opens its own read-only connection
-    # and the ingest is the only writer (§10.2.3, deploy.md). `--reload` forces 1.
-    workers = None if args.reload or args.workers <= 1 else args.workers
-    # The import STRING is required: uvicorn re-imports it per worker and on
-    # reload. Passing `create_app()` here would silently disable both. The DB
-    # path therefore has to come from config/env (not `args`) so each fresh
-    # import resolves it identically.
-    uvicorn.run(
-        "insynshandel.api.app:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        workers=workers,
-    )
-    return 0
-
-
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from . import doctor
 
@@ -423,14 +399,8 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--quiet", action="store_true",
                     help="no fx/figi/marketcaps progress meter, only the summaries")
 
-    es = sub.add_parser("export-static", help="dump the read API to static JSON (§9)")
+    es = sub.add_parser("export-static", help="dump the read layer to static JSON (§9)")
     es.add_argument("--out", default="dist", help="output directory (default: dist/)")
-
-    sv = sub.add_parser("serve", help="run the read-only API (§8)")
-    sv.add_argument("--host", default=config.API_HOST)
-    sv.add_argument("--port", type=int, default=config.API_PORT)
-    sv.add_argument("--reload", action="store_true", help="dev auto-reload")
-    sv.add_argument("--workers", type=int, default=1, help="uvicorn worker processes")
 
     doc = sub.add_parser("doctor", help="run acceptance checks (§11)")
     doc.add_argument("--network", action="store_true",
@@ -455,8 +425,6 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_build(args)
     if args.command == "export-static":
         return _cmd_export_static(args)
-    if args.command == "serve":
-        return _cmd_serve(args)
     if args.command == "doctor":
         return _cmd_doctor(args)
     return 2

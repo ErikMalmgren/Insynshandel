@@ -4,7 +4,7 @@
 # Scheduling and deployment
 ## 10. Scheduling & deployment
 
-### 10.1 Static-only path (recommended start — free)
+### 10.1 Static-only path — the deployment
 
 `.github/workflows/ingest.yml`:
 
@@ -33,45 +33,13 @@ mechanism you chose. `VACUUM` after backfill; consider not indexing
 Concurrency: `concurrency: { group: ingest, cancel-in-progress: false }` so two
 runs never write the DB at once.
 
-### 10.2 API path — portable by construction
+### 10.2 ~~API path~~ — removed 2026-09-23
 
-The whole runtime is **one process and one file.** Nothing in this plan
-requires a managed service, a cloud API, or a specific provider. At request time
-the API talks to exactly one thing: a local SQLite file. Every external source
-(FI, OpenFIGI, Riksbank, the market-cap provider) is contacted only
-during ingest, as outbound HTTPS.
-
-That is what makes a rented VPS and a machine in your flat the same deployment
-with different networking around it.
-
-```
-┌─────────────────────────────────────────────────┐
-│  host (VPS or home server, identical inside)    │
-│                                                 │
-│   systemd timer ──▶ insyn ingest / build        │  writer, periodic
-│                            │                    │
-│                            ▼                    │
-│                   insynshandel.db  (WAL)        │  ← one file
-│                            │                    │
-│   caddy/nginx ──▶ uvicorn ─┘                    │  readers, always on
-└─────────────────────────────────────────────────┘
-```
-
-#### 10.2.1 What actually differs between a VPS and a home server
-
-Nothing in the application. Everything is in getting requests to it:
-
-| Concern | VPS | Home server |
-| --- | --- | --- |
-| Inbound reachability | Public IP, just works | NAT port-forward, or a tunnel. **Many Swedish ISPs use CGNAT**, where port-forwarding is impossible and a tunnel is the only option |
-| TLS certificate | Let's Encrypt HTTP-01, trivial | HTTP-01 needs inbound :80. Behind CGNAT use DNS-01, or let a tunnel terminate TLS |
-| Stable address | Static IP | Dynamic IP → DDNS, or a tunnel |
-| Uptime | Provider's problem | Power cuts, reboots, your ISP's maintenance |
-| Backup | Snapshot + Litestream | **Must be offsite** — same building as the original is not a backup |
-
-For the home case, a tunnel (Cloudflare Tunnel, Tailscale Funnel) solves
-reachability, TLS and dynamic IP in one step and needs no inbound ports at all.
-That is the recommended route if you are behind CGNAT.
+A FastAPI reader behind Docker, Caddy and a systemd timer, on a VPS or a home
+server. Built, never deployed, then removed: the static path (§10.1) covers the
+whole product. §10.2.1, §10.2.3, §10.2.4, §10.4 and §10.5 went with it. §10.2.2
+stays because it applies to any machine that holds the database — a laptop
+working copy included (invariant 17).
 
 #### 10.2.2 The one real trap: WAL on a network filesystem
 
@@ -84,37 +52,6 @@ That is the recommended route if you are behind CGNAT.
 > This is the single most likely way a home deployment goes wrong, because
 > putting data on the NAS is otherwise the obviously sensible instinct. Keep the
 > live DB on the server's own SSD and **back up** to the NAS.
-
-#### 10.2.3 Read-only API connections
-
-The ingest writes; the API only reads. Make that structural rather than
-conventional:
-
-```python
-sqlite3.connect("file:data/insynshandel.db?mode=ro", uri=True)
-```
-
-WAL allows one writer concurrent with many readers, so the API keeps serving
-while `insyn build` runs. A read-only connection means an API bug can never
-take a write lock and stall the ingest, and it makes multi-worker uvicorn safe
-by construction (§10.5).
-
-#### 10.2.4 Splitting ingest from serving
-
-Because the artifact is a single file, the two halves do not have to live on the
-same machine:
-
-- **Ingest at home, serve on a VPS** — run `insyn build` on the home box, then
-  `rsync` or `litestream replicate` the DB to the VPS. The public surface has no
-  outbound dependencies at all.
-- **Everything on one host** — simplest, and the right default.
-
-Do not run two writers against the same file from different machines. The
-ingest is a single-writer design and there is no coordination for it.
-
-Secrets (`OPENFIGI_API_KEY`) via env or a systemd `EnvironmentFile`. Nothing in
-this system needs a secret to *read* FI data — the export endpoint is
-unauthenticated.
 
 ### 10.3 Cadence
 
@@ -144,112 +81,3 @@ Notes on the FI cadence:
 
 Only `refdata marketcaps` writes on every run by design — it appends one
 `(lei, as_of)` snapshot per company per day, which is the point (§7.1).
-
-### 10.4 Containerisation
-
-Docker is **in scope**, for a reason specific to this project: §10.2 requires
-the same application to run on a rented VPS and on a machine at home. That is
-precisely the problem containers solve, and it is the cheapest way to guarantee
-the two hosts behave identically.
-
-It also *reduces* dependency risk rather than adding it. `yfinance` and its
-transitive tree are the flakiest part of this system (§7.4); pinning the Python
-version and the whole dependency set into an image means a `pip` resolution
-change on one host cannot break the other.
-
-Keep it minimal — two files, no orchestration:
-
-```dockerfile
-# Dockerfile — uv's own image, so the interpreter version is pinned by
-# .python-version alone and there is no second place to keep in sync.
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
-WORKDIR /app
-COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --frozen --no-dev            # cached unless the lockfile changes
-COPY src/ ./src/
-COPY data/seed/ ./data/seed/
-ENV INSYN_DB=/data/insynshandel.db
-VOLUME ["/data"]
-EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "insynshandel.api.app:app", \
-     "--host", "0.0.0.0", "--port", "8000"]
-```
-
-```yaml
-# docker-compose.yml
-services:
-  api:
-    build: .
-    restart: unless-stopped
-    ports: ["127.0.0.1:8000:8000"]
-    volumes: ["./data:/data"]          # bind mount, NOT a named volume
-  ingest:
-    build: .
-    restart: "no"
-    volumes: ["./data:/data"]
-    entrypoint: ["uv", "run", "insyn", "build"]
-```
-
-Three rules that matter more than the files:
-
-1. **The database lives in a bind-mounted volume, never in the image layer.**
-   A container rebuild must not lose 180,000 rows and a decade of market-cap
-   history. `./data:/data` keeps the file on the host where you can back it up.
-2. **The `/data` bind mount must point at local disk**, for the WAL reason in
-   §10.2.2. A container does not make a NAS mount safe.
-3. **Run the ingest from the host's scheduler, not a container that sleeps.**
-   A `systemd` timer calling `docker compose run --rm ingest` is simpler to
-   observe and restart than a long-lived container running its own cron, and it
-   keeps §10.3's cadence in one place.
-
-Bind the API to `127.0.0.1` and let the host's Caddy or nginx terminate TLS and
-proxy to it. Do not expose uvicorn directly.
-
-### 10.5 Python as a backend — what to expect
-
-Python is thoroughly ordinary as a backend language; FastAPI on uvicorn is a
-production-grade stack. The mechanics differ from PHP or a Node script, so here
-is the model explicitly.
-
-**The stack, top to bottom:**
-
-```
-internet → Caddy/nginx      TLS, compression, static files, rate limiting
-         → uvicorn          ASGI server — the actual HTTP process
-         → FastAPI app      your routes
-         → sqlite3 (ro)     the data
-```
-
-`uvicorn` is the equivalent of Node's `http` server: a long-running process that
-owns the socket. It is **not** CGI — there is no per-request interpreter
-startup. You run it under `systemd` (or Docker), and it stays up.
-
-**Will it be fast enough?** Comfortably, and not close. Every request this API
-serves is an indexed read from a precomputed table — the leaderboard is ~700
-rows from `agg_company_period`. That is single-digit milliseconds, dominated by
-JSON serialisation rather than SQLite. On the static-JSON path there is no
-Python in the request path at all.
-
-The workload is entirely I/O-bound, so the GIL is irrelevant here. Async
-FastAPI on one uvicorn process handles hundreds of concurrent requests fine.
-
-**Worker processes and SQLite.** `uvicorn --workers N` forks N processes sharing
-one database file. That is safe **because the API opens read-only** (§10.2.3)
-and WAL permits many concurrent readers. Start with `--workers 2`; there is no
-reason to go higher at this scale.
-
-> Never run the ingest inside a uvicorn worker. It is the single writer, it runs
-> for minutes, and a request-triggered ingest would block a worker and race the
-> scheduler. Ingest is always a separate process invoked by the scheduler.
-
-**Things that genuinely bite people, and how this plan avoids them:**
-
-| Common Python-backend problem | Why it does not apply here |
-| --- | --- |
-| Slow cold starts on serverless | Not serverless — a persistent process (§0.1) |
-| Dependency drift between machines | `uv.lock` pins everything; Docker pins the interpreter too |
-| Blocking calls stalling the event loop | The only slow I/O is ingest, which never runs in the web process |
-| SQLite locking under concurrency | Read-only API connections + WAL + a single writer |
-| Long-running requests timing out | No request does real work; everything is precomputed |
-
----

@@ -1,8 +1,7 @@
-"""Phase 6 — dump the read API to static JSON (§9).
+"""Phase 6 — dump the read layer to static JSON (§9).
 
-Every file is produced by calling a :mod:`insynshandel.api.reads` function and
-serializing its Pydantic model — the *same* function Phase 4's routes call, so
-the two read paths cannot drift (§1.1).
+Every file is produced by calling a :mod:`insynshandel.reads` function and
+serializing its Pydantic model (:mod:`insynshandel.schemas`).
 
     dist/meta.json
     dist/leaderboard-{30d,90d,365d,all}.json     (complete, UNSORTED — §8.2)
@@ -20,8 +19,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config
-from .api import reads
+from . import config, reads
 
 _LEI_RE = re.compile(r"^[A-Za-z0-9]{18,20}$")
 

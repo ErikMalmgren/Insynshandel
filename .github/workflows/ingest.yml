@@ -79,9 +79,9 @@ jobs:
       - name: Export static
         run: uv run insyn export-static --out dist/
 
-      # Deliberately fatal here (unlike deploy/ingest.sh, which is advisory):
-      # a failed check in CI should stop the publish, not ship bad JSON. Soft
-      # issues like a degraded market-cap provider SKIP rather than fail.
+      # Deliberately fatal: a failed check should stop the publish, not ship
+      # bad JSON. Soft issues like a degraded market-cap provider SKIP rather
+      # than fail.
       - name: Acceptance checks
         run: uv run insyn doctor
 

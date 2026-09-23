@@ -3,7 +3,7 @@
 Every insider transaction reported to Sweden's financial regulator
 (Finansinspektionen's *insynsregistret*) since July 2016, aggregated per
 company. A pipeline turns the regulator's paginated CSV export into one SQLite
-file, then publishes it as static JSON and a read-only HTTP API.
+file, then publishes it as static JSON for a site on GitHub Pages.
 
 <!-- TODO after first deploy: screenshot + live link, above the fold. -->
 **Live:** _not deployed yet_ · **Plan:** [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
@@ -18,11 +18,10 @@ uv run insyn db migrate
 uv run insyn ingest backfill      # full history, ~330 requests, 30–45 min
 uv run insyn build                # normalize → reference data → aggregate
 uv run insyn export-static --out dist/
-uv run insyn serve                # the API on :8000, or just serve dist/
 ```
 
 `insyn ingest recent --days 7` is the incremental run; `insyn doctor` is the
-acceptance-check suite. Deployment (GitHub Actions or Docker) is in
+acceptance-check suite. Deployment (GitHub Actions → Pages) is in
 [`deploy/`](deploy/).
 
 ## The data problems, and what the pipeline does about them

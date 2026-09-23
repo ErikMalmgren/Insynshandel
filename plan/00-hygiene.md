@@ -9,8 +9,6 @@ Insynshandel/
 ├── pyproject.toml
 ├── uv.lock                         (committed — §2.1)
 ├── .python-version                 (committed — 3.14, §2.1)
-├── Dockerfile                      (§10.4)
-├── docker-compose.yml              (§10.4)
 ├── README.md                       (§15)
 ├── IMPLEMENTATION_PLAN.md          ← this file
 ├── .gitignore
@@ -44,10 +42,8 @@ Insynshandel/
 │   │   ├── normalize.py            phase 2
 │   │   ├── aggregate.py            phase 3 (classify, outliers, aggregates)
 │   │   └── reference.py            phase 5 (figi / fx / marketcaps)
-│   ├── api/
-│   │   ├── app.py
-│   │   ├── routes.py
-│   │   └── schemas.py              pydantic models (shared with export)
+│   ├── reads.py                    read functions behind every JSON file
+│   ├── schemas.py                  pydantic models (the JSON contract)
 │   ├── export_static.py            phase 6
 │   └── cli.py
 └── tests/
@@ -55,25 +51,27 @@ Insynshandel/
     ├── test_fi_client.py
     ├── test_normalize.py
     ├── test_aggregate.py
-    └── test_api.py
+    └── test_export.py
 ```
 
 ### 2.1 Toolchain — `uv`, and why the interpreter is pinned
 
 Use **`uv`**, not `pip` + `venv`. The reason is specific to this project, not
-general enthusiasm: **five environments must agree on the same dependency set
+general enthusiasm: **every environment must agree on the same dependency set
 and the same Python version.**
 
 ```
-your laptop  ·  home server  ·  VPS  ·  Docker image  ·  GitHub Actions
+your laptop  ·  GitHub Actions
 ```
 
 `pip freeze` produces a flat list of what happened to be installed on one
 machine, for one Python version, one OS. `uv.lock` is a resolved, hashed,
 **cross-platform** lockfile — `uv sync --frozen` installs a byte-identical
 dependency tree everywhere. Given that `yfinance` is the flakiest thing in this
-system (§7.4), removing "it resolved differently on the server" from the list of
-possible causes is worth real money in debugging time.
+system (§7.4), removing "it resolved differently in CI" from the list of
+possible causes is worth real money in debugging time. (The list once also
+held a home server, a VPS and a Docker image — the API path, removed
+2026-09-23.)
 
 The second reason matters just as much: **`uv` manages the interpreter too.**
 `pip` cannot. That closes the gap this plan had until now — your machine runs
@@ -84,7 +82,6 @@ version is declared once and enforced everywhere:
 ```
 .python-version        →  3.14
 pyproject.toml         →  requires-python = ">=3.14"
-Dockerfile             →  ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 ```
 
 Setup, once:
@@ -92,7 +89,7 @@ Setup, once:
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv init --python 3.14          # writes .python-version + pyproject.toml
-uv add fastapi uvicorn pydantic yfinance requests
+uv add pydantic yfinance requests
 uv add --dev pytest ruff
 uv sync                        # creates .venv, installs from uv.lock
 ```
@@ -124,7 +121,6 @@ insyn build                # normalize -> refdata -> aggregate; USE THIS (§5.0)
 insyn normalize            # individual steps, for debugging only
 insyn aggregate
 insyn export-static --out dist/
-insyn serve [--port 8000]
 insyn doctor               # runs the acceptance checks in §11
 ```
 
@@ -195,7 +191,7 @@ Install `uv` and pin the interpreter before anything else — §2.1 explains why
 curl -LsSf https://astral.sh/uv/install.sh | sh
 rm -rf .venv                    # the existing venv is pip-managed; uv recreates it
 uv init --python 3.14
-uv add fastapi uvicorn pydantic yfinance requests
+uv add pydantic yfinance requests
 uv add --dev pytest ruff
 uv sync
 ```

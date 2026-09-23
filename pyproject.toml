@@ -1,15 +1,13 @@
 [project]
 name = "insynshandel"
 version = "0.1.0"
-description = "Swedish insider-trading data (FI insynsregistret) → SQLite → static JSON + read-only API"
+description = "Swedish insider-trading data (FI insynsregistret) → SQLite → static JSON"
 readme = "README.md"
 authors = [
     { name = "Erik Malmis", email = "e.malmis@gmail.com" },
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi",
-    "uvicorn",
     "pydantic",
     "yfinance",
     "requests",
@@ -25,18 +23,12 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest",
     "ruff",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-    # starlette 1.6's TestClient nudges toward an httpx2 that is not released yet
-    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
-    "ignore:The anyio.abc.BlockingPortal alias is deprecated",
-]
 
 [tool.ruff]
 target-version = "py314"

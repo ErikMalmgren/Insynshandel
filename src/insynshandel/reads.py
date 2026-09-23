@@ -1,6 +1,6 @@
-"""Shared read functions — the single source of truth for both the API routes
-(Phase 4) and the static export (Phase 6). Each takes a read connection and
-returns a :mod:`schemas` model.
+"""Read functions behind the static export (Phase 6). Each takes a read
+connection and returns a :mod:`schemas` model; ``export_static.py`` serializes
+it to one JSON file.
 
 `pct_of_mcap` and `market_cap` are read **through `market_cap_current`** so the
 0 sentinel is already SQL ``NULL`` before any arithmetic (§6.4). Never divide a
@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from .. import config
-from . import schemas
+from . import config, schemas
 
 FI_SEARCH = (
     "https://marknadssok.fi.se/Publiceringsklient/sv-SE/Search/Search"
@@ -24,7 +23,7 @@ def _iso_now() -> str:
     return config.now_local_iso()
 
 
-# ── /meta ──────────────────────────────────────────────────────────────────
+# ── meta.json ──────────────────────────────────────────────────────────────
 def meta(conn: sqlite3.Connection) -> schemas.Meta:
     cov = conn.execute(
         "SELECT MIN(pub_date) lo, MAX(pub_date) hi FROM coverage_day"
@@ -94,7 +93,7 @@ def meta(conn: sqlite3.Connection) -> schemas.Meta:
     )
 
 
-# ── /leaderboard ───────────────────────────────────────────────────────────
+# ── leaderboard-{period}.json ──────────────────────────────────────────────
 _LEADERBOARD_SQL = """
 SELECT a.lei, a.period_start, a.period_end,
        COALESCE(co.display_name, a.lei) AS name,
@@ -141,22 +140,12 @@ def leaderboard(conn: sqlite3.Connection, period: str) -> schemas.Leaderboard:
     )
 
 
-# ── /companies ─────────────────────────────────────────────────────────────
-def company_index(
-    conn: sqlite3.Connection, q: str | None = None
-) -> schemas.CompanyIndex:
-    """Complete company index (§8.2 — the client sorts). ``q`` is a server-side
-    *filter* over name / ticker / LEI, not a sort or a paginate, so it does not
-    reintroduce the split-brain §8.2 forbids. ``q=None`` returns exactly what
-    ``companies.json`` holds, so the export/route parity still stands."""
-    sql = "SELECT lei, display_name, raw_ticker FROM company"
-    params: list[str] = []
-    if q:
-        like = f"%{q}%"
-        sql += " WHERE display_name LIKE ? OR raw_ticker LIKE ? OR lei LIKE ?"
-        params = [like, like, like]
-    sql += " ORDER BY display_name"
-    rows = conn.execute(sql, params).fetchall()
+# ── companies.json ─────────────────────────────────────────────────────────
+def company_index(conn: sqlite3.Connection) -> schemas.CompanyIndex:
+    """Complete company index (§8.2 — the client sorts and filters)."""
+    rows = conn.execute(
+        "SELECT lei, display_name, raw_ticker FROM company ORDER BY display_name"
+    ).fetchall()
     return schemas.CompanyIndex(
         count=len(rows),
         companies=[
@@ -170,7 +159,7 @@ def company_index(
     )
 
 
-# ── /companies/{lei} ───────────────────────────────────────────────────────
+# ── company/{lei}.json ─────────────────────────────────────────────────────
 # rows for a company, following any issuer_alias merge (§7.2.3)
 _TX_FROM = (
     "FROM transaction_norm WHERE COALESCE("
@@ -245,125 +234,7 @@ def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail 
     )
 
 
-# ── /transactions + /companies/{lei}/transactions ──────────────────────────
-# "Sort where you paginate" (§8.2): these are the paginated feeds, so they sort
-# server-side — on a CLOSED allow-list. A client `order` value is looked up here,
-# never interpolated. `raw_id` is the final tiebreaker so a stable page N+1 never
-# re-serves rows from page N (gross_value_sek has many ties and NULLs).
-_TX_ORDER = {"date": "transaction_date", "value": "gross_value_sek"}
-_TX_DIR = {"asc": "ASC", "desc": "DESC"}
-
-_FOLD = (
-    "COALESCE((SELECT canonical_lei FROM issuer_alias "
-    "WHERE alias_lei = transaction_norm.lei), transaction_norm.lei)"
-)
-_GLOBAL_TX_COLS = (
-    "lei, issuer_name, transaction_date, published_date, nature, sign, is_counted, "
-    "instrument_type, instrument_name, isin, volume, price, currency, "
-    "gross_value_sek, verification, exclude_reason"
-)
-
-
-def _order_by(order: str, direction: str) -> str:
-    if order not in _TX_ORDER:
-        raise ValueError(f"unknown order {order!r}")
-    if direction not in _TX_DIR:
-        raise ValueError(f"unknown direction {direction!r}")
-    d = _TX_DIR[direction]
-    return f"{_TX_ORDER[order]} {d}, raw_id {d}"
-
-
-def _global_tx(r: sqlite3.Row) -> schemas.Transaction:
-    return schemas.Transaction(
-        lei=r["lei"] or "", issuer_name=r["issuer_name"] or "",
-        transaction_date=r["transaction_date"], published_date=r["published_date"],
-        nature=r["nature"], sign=r["sign"], is_counted=r["is_counted"],
-        instrument_type=r["instrument_type"], instrument_name=r["instrument_name"],
-        isin=r["isin"], volume=r["volume"], price=r["price"], currency=r["currency"],
-        gross_value_sek=r["gross_value_sek"], verification=r["verification"] or "",
-        exclude_reason=r["exclude_reason"],
-    )
-
-
-def transactions(
-    conn: sqlite3.Connection,
-    *,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    lei: str | None = None,
-    isin: str | None = None,
-    order: str = "date",
-    direction: str = "desc",
-    limit: int | None = None,
-    offset: int = 0,
-) -> schemas.Paginated[schemas.Transaction]:
-    """Global transaction feed — paginated, server-sorted. No `pdmr` filter and
-    no `pdmr` column (§8.1): a searchable global feed keyed on people is exactly
-    the person index this project does not build."""
-    limit = config.API_PAGE_DEFAULT if limit is None else limit
-    order_by = _order_by(order, direction)
-
-    clauses, params = [], []
-    if date_from:
-        clauses.append("transaction_date >= ?"); params.append(date_from)
-    if date_to:
-        clauses.append("transaction_date <= ?"); params.append(date_to)
-    if lei:
-        clauses.append(f"{_FOLD} = ?"); params.append(lei)
-    if isin:
-        clauses.append("isin = ?"); params.append(isin)
-    where = " AND ".join(clauses) if clauses else "1"
-
-    total = conn.execute(
-        f"SELECT COUNT(*) c FROM transaction_norm WHERE {where}", params
-    ).fetchone()["c"]
-    rows = conn.execute(
-        f"SELECT {_GLOBAL_TX_COLS} FROM transaction_norm WHERE {where} "
-        f"ORDER BY {order_by} LIMIT ? OFFSET ?",
-        (*params, limit, offset),
-    ).fetchall()
-    return schemas.Paginated[schemas.Transaction](
-        items=[_global_tx(r) for r in rows], total=total, limit=limit, offset=offset
-    )
-
-
-def company_transactions(
-    conn: sqlite3.Connection,
-    lei: str,
-    *,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    order: str = "date",
-    direction: str = "desc",
-    limit: int | None = None,
-    offset: int = 0,
-) -> schemas.Paginated[schemas.CompanyTransaction] | None:
-    """Paginated for consistency with `/transactions`. `None` when the LEI is
-    unknown, so the route can 404. Keeps `pdmr` / `position` — this IS a
-    company's own transaction list, the one context §8.1 grants them."""
-    if conn.execute("SELECT 1 FROM company WHERE lei = ?", (lei,)).fetchone() is None:
-        return None
-    limit = config.API_PAGE_DEFAULT if limit is None else limit
-    order_by = _order_by(order, direction)
-
-    base = _TX_FROM  # "FROM transaction_norm WHERE <alias-fold> = ?"
-    params: list[object] = [lei]
-    if date_from:
-        base += " AND transaction_date >= ?"; params.append(date_from)
-    if date_to:
-        base += " AND transaction_date <= ?"; params.append(date_to)
-
-    total = conn.execute(f"SELECT COUNT(*) c {base}", params).fetchone()["c"]
-    rows = conn.execute(
-        f"SELECT {_TX_COLS} {base} ORDER BY {order_by} LIMIT ? OFFSET ?",
-        (*params, limit, offset),
-    ).fetchall()
-    return schemas.Paginated[schemas.CompanyTransaction](
-        items=[_tx(r) for r in rows], total=total, limit=limit, offset=offset
-    )
-
-
-# ── /data-quality ──────────────────────────────────────────────────────────
+# ── data-quality.json ──────────────────────────────────────────────────────
 def data_quality(conn: sqlite3.Connection) -> schemas.DataQuality:
     rows = conn.execute(
         """
