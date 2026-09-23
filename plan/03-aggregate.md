@@ -585,6 +585,10 @@ therefore `unverifiable` (§6.4) — which is the correct outcome, not a bug.
   `SELECT DISTINCT currency FROM fx_rate` plus `SEK`.
 ### 11.3 Parity with the current script (run once, then delete the old code)
 
+> **Skipped 2026-09-23.** The legacy scripts and `data/cache/legacy/` were
+> deleted without running this check; the pipeline had been live since the
+> backfill. Kept as the record of what the check would have compared.
+
 Point the new pipeline at the same window `Insyn2026-04-21.csv` covers
 (`2026-03-13 .. 2026-04-21`), currency SEK, and compare the
 top 20 by net value against `python script.py`.

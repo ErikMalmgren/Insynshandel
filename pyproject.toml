@@ -32,5 +32,3 @@ testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py314"
-# Legacy ad-hoc scripts kept for the phase-3 parity check (§11.3), then deleted.
-extend-exclude = ["script.py", "lei_isin.py", "marketCap.py", "test_find_unknown.py"]

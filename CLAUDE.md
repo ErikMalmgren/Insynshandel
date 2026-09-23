@@ -145,15 +145,16 @@ keeps working while the data goes wrong.
      a blank one from a name. Needs an `issuer_name`-keyed table + a join
      change: schema work, not a seed-file edit. ⚠ box in
      `plan/03-aggregate.md` §6.5.
-  2. §11.3 parity vs `python script.py`, then delete the 4 legacy root scripts
-     (inputs in `data/cache/legacy/`). Runnable now.
-  3. `refdata marketcaps` — 419 caps over 534 addressable, so 115 missing.
+  2. `refdata marketcaps` — 419 caps over 534 addressable, so 115 missing.
      Snapshots are dated + append-only, so a re-run is cheap.
-  4. ~~Wire the frontend deploy~~ — workflow side done 2026-09-22; the Pages +
+  3. ~~Wire the frontend deploy~~ — workflow side done 2026-09-22; the Pages +
      DNS clicks are the user's (checklist in `deploy/README.md`).
   - ~~`refdata figi`~~ / ~~`refdata fx --backfill`~~ **both done** — see
     `plan/05-refdata.md` §7.5 for what they returned and the ⚠ 90-day retry
     freeze on figi's 5222 NULL tickers.
+  - ~~§11.3 parity~~ **skipped** — the 4 legacy root scripts and
+    `data/cache/legacy/` were deleted 2026-09-23. Nothing local is needed to
+    rebuild the DB: `deploy/README.md` § Recovery.
 - Gotchas:
   - **Invariants 9 & 12 overstate LEI coverage** (`2016-07` 79% no-LEI, modern
     0%). `aggregate` excludes blank-`lei` rows as `exclude_reason='no_lei'`
@@ -191,7 +192,6 @@ keeps working while the data goes wrong.
   - `refdata fx`/`figi`/`marketcaps` print a stderr progress meter (`_Progress`
     in `cli.py`); `--quiet` silences it, and piping through `tail` swallows it.
     yfinance's own chatter scrolls it away.
-  - `data/cache/legacy/` is gitignored & absent from a fresh clone.
   - `ticker_override.csv`: `symbol='?'` = worklist (loader skips); `provider`
     PK is `''` not `NULL`.
   - `.strip()` from `data/seed/*.csv` comment lines (`#`) — `load_seeds` skips them.

@@ -25,7 +25,7 @@ Columns: `lei,provider,symbol,note`.
 
 ### Seeding note
 
-Seeded from `data/cache/legacy/failed_isins.csv` — 61 LEIs whose ISIN OpenFIGI's
+Seeded from the legacy `failed_isins.csv` (deleted 2026-09-23) — 61 LEIs whose ISIN OpenFIGI's
 XSTO lookup could not resolve as of the legacy run, all marked `symbol = ?`.
 **"OpenFIGI failed" is not "this company has no symbol"** — most are real listed
 companies the lookup just missed. `db.load_seeds()` skips every `?` row.

@@ -19,7 +19,6 @@ SEED_DIR = REPO_ROOT / "data" / "seed"
 # The DB must live on local disk — SQLite WAL corrupts on NFS/SMB (CLAUDE.md #17).
 DATA_DIR = Path(os.environ.get("INSYN_DATA_DIR", REPO_ROOT / "data"))
 DB_PATH = Path(os.environ.get("INSYN_DB_PATH", DATA_DIR / "insynshandel.db"))
-CACHE_DIR = DATA_DIR / "cache"
 
 # ── FI export source (plan/01-ingest.md §4.1) ────────────────────────────────
 FI_SEARCH_URL = "https://marknadssok.fi.se/Publiceringsklient/sv-SE/Search/Search"

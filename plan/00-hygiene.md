@@ -15,7 +15,6 @@ Insynshandel/
 ├── .github/workflows/ingest.yml
 ├── data/
 │   ├── insynshandel.db             (gitignored)
-│   ├── cache/                      (gitignored — downloaded zips/CSVs)
 │   └── seed/
 │       ├── nature_map.csv          (committed — Karaktär → sign, §6.1)
 │       ├── ticker_override.csv     (committed — manual LEI→ticker fixes, §7.3)
@@ -208,7 +207,8 @@ Commit `pyproject.toml`, `uv.lock` and `.python-version`. Do **not** commit
 - `failed_isins.csv` (62 rows) becomes the seed for
   `data/seed/ticker_override.csv` — see §7.3.
 - Keep `script.py`, `lei_isin.py`, `marketCap.py`, `test_find_unknown.py` until
-  phase 3 passes its parity check (§11.3), then delete them.
+  phase 3 passes its parity check (§11.3), then delete them. (Deleted
+  2026-09-23 together with `data/cache/legacy/`; §11.3 was skipped.)
 
 **Acceptance:** `git add -A && git status` shows no file over 10 MB.
 

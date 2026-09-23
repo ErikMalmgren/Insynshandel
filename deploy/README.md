@@ -35,9 +35,9 @@ bad JSON never ships — the previous deploy stays live.
       If `deploy` fails fetching the artifact, add `actions: read` to its
       `permissions:`.
 
-`frontend/CNAME` is harmless but **ignored**: with an Actions-based deploy,
-GitHub takes the custom domain from Settings → Pages only (step 2 below), and
-that setting survives redeploys on its own.
+There is no `CNAME` file: with an Actions-based deploy, GitHub takes the custom
+domain from Settings → Pages only (step 2 below), and that setting survives
+redeploys on its own.
 
 ### 2 — Cloudflare DNS — do these in order
 
@@ -86,11 +86,26 @@ curl -s -o /dev/null -w '%{http_code}\n' https://insyn.malmgren.dev/nope
   already applies to `www` — irrelevant here, since this site publishes no
   addresses, but it is the same zone.
 
+## Recovery
+
+If `data/insynshandel.db` is lost or corrupted:
+
+1. **Restore the backup.** Every successful `ingest.yml` run re-uploads the
+   whole DB as the `db-latest` release asset:
+   `gh release download db-latest --pattern insynshandel.db --dir data --clobber`
+2. **Or rebuild from scratch** — every source is re-fetched live, nothing local
+   is needed:
+   `insyn db migrate` → `insyn ingest backfill` (~330 requests, 30–45 min) →
+   `insyn refdata fx --backfill` → `insyn build` → `insyn doctor`.
+
+`db-latest` is a single rolling copy, overwritten on every run that passes
+`doctor`. Corruption that `doctor` does not catch replaces the good copy — then
+only option 2 is left.
+
 ## Post-backfill checklist
 
 Tracked in the repo's Claude memory; in short:
 
 - `insyn refdata fx --backfill` → `insyn refdata figi` → `insyn refdata marketcaps`
 - `insyn build && insyn doctor` — the backfill-gated checks should now run
-- §11.3 parity vs `python script.py`, then delete the four legacy root scripts
 - build the `issuer_name → lei` recovery map and re-aggregate early history

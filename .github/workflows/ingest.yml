@@ -6,7 +6,7 @@
 #   Job `deploy`: publish `site/` to this repo's Pages (insyn.malmgren.dev).
 #
 #   Needs Settings → Pages → Source: "GitHub Actions". The custom domain is
-#   set there too — with an Actions deploy, `frontend/CNAME` is ignored.
+#   set there too (an Actions deploy ignores a CNAME file).
 #   Optional secret: `OPENFIGI_API_KEY`.
 # ─────────────────────────────────────────────────────────────────────────────
 name: ingest

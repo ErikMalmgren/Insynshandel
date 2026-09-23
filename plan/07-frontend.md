@@ -65,7 +65,7 @@ cp -r dist/.     site/data/
 Result:
 
 ```
-site/index.html  company.html  about.html  404.html  CNAME
+site/index.html  company.html  about.html  404.html
      css/insyn.css   js/*.js
      data/meta.json  companies.json  leaderboard-*.json  company/<LEI>.json
 ```
@@ -204,7 +204,6 @@ at all is one `curl` after the first deploy — see the checklist in
 
 ```
 frontend/
-  CNAME                 insyn.malmgren.dev — must be in the artifact
   index.html
   company.html
   about.html
