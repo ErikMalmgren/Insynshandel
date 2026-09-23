@@ -33,7 +33,7 @@ class _Progress:
             0.25 if self.tty else 30.0
         )
         self.start = time.monotonic()
-        self._last = 0.0
+        self._last = float("-inf")  # monotonic() epoch is boot; a fresh CI VM is < every
         self._dirty = False
 
     @staticmethod
