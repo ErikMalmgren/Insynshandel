@@ -48,7 +48,9 @@ jobs:
 
       # 1. Restore the DB from the rolling release. First run: no asset yet →
       #    start from a fresh migration. (`gh release download` exits non-zero
-      #    when the tag or asset is missing.)
+      #    when the tag or asset is missing.) Migrate either way: a restored DB
+      #    predates any migration added since it was uploaded, and `migrate`
+      #    only applies the ones it lacks.
       - name: Restore insynshandel.db
         run: |
           mkdir -p data
@@ -56,8 +58,8 @@ jobs:
             echo "restored $(du -h data/insynshandel.db | cut -f1) from db-latest"
           else
             echo "no db-latest asset — migrating a fresh database"
-            uv run insyn db migrate
           fi
+          uv run insyn db migrate
 
       # 2. Heal any missed window — nightly only.
       - name: Heal gaps (nightly)
