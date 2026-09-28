@@ -7,8 +7,8 @@
  * No person field is read here, by design — see the header of insyn.js.
  */
 
-import { url, getJSON, fmt, el, clear, setStatus, moneyCell, mcapCell, pctCell }
-    from './insyn.js?v=1';
+import { url, getJSON, fmt, el, clear, setStatus, moneyCell, mcapCell, pctCell, tickerMatches }
+    from './insyn.js?v=2';
 
 const PERIODS = [
     ['30d',  '30 days'],
@@ -134,8 +134,7 @@ function compare(a, b) {
 function matches(entry, needle) {
     if (!needle) return true;
     const name = entry.name.toLocaleLowerCase('sv');
-    const ticker = (entry.ticker || '').toLocaleLowerCase('sv');
-    return name.includes(needle) || ticker.includes(needle);
+    return name.includes(needle) || tickerMatches(entry.ticker, needle);
 }
 
 function cell(entry, col) {

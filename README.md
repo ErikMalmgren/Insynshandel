@@ -60,7 +60,7 @@ This is most of the work. The register is public but awkward.
 - **Totals sometimes land in the price column.** FI occasionally writes a total
   amount into `Pris`, so volume × price squares it (one 2018 row reads as 6.7
   quadrillion SEK). An equity unit price above 10,000 SEK, or the same amount
-  above 1 bn SEK written into both columns, is excluded as
+  above 1 md SEK written into both columns, is excluded as
   `implausible_unit_price`.
 - **Every amount is converted to SEK** at the Riksbank rate for the
   transaction's own date, forward-filled across weekends and holidays. A few

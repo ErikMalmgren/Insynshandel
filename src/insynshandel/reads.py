@@ -12,6 +12,7 @@ from __future__ import annotations
 import sqlite3
 
 from . import config, schemas
+from .sources.openfigi import display_ticker
 
 FI_SEARCH = (
     "https://marknadssok.fi.se/Publiceringsklient/sv-SE/Search/Search"
@@ -21,6 +22,25 @@ FI_SEARCH = (
 
 def _iso_now() -> str:
     return config.now_local_iso()
+
+
+def _bare(ticker: str) -> str:
+    return ticker.upper().replace("-", "").replace(" ", "")
+
+
+def _ticker(raw: str | None, figi_name: str | None, yahoo: str | None) -> str | None:
+    """`company.raw_ticker` is OpenFIGI verbatim ('TELE2B'); the site shows the
+    class dash-separated ('TELE2-B').
+
+    Yahoo's symbol spells the class out ('TELE2-B.ST') and is taken when it is
+    the same ticker; OpenFIGI's name often does not ('BEIJER REF AB' for
+    BEIJB), so it is only the fallback. No class in either stays undashed —
+    guessing one from a trailing letter is what made TELIA into TELI-A."""
+    if not raw:
+        return None
+    if yahoo and yahoo.endswith(".ST") and _bare(yahoo[:-3]) == _bare(raw):
+        return yahoo[:-3]
+    return display_ticker(raw, figi_name or "")
 
 
 # ── meta.json ──────────────────────────────────────────────────────────────
@@ -97,7 +117,7 @@ def meta(conn: sqlite3.Connection) -> schemas.Meta:
 _LEADERBOARD_SQL = """
 SELECT a.lei, a.period_start, a.period_end,
        COALESCE(co.display_name, a.lei) AS name,
-       co.raw_ticker AS ticker,
+       co.raw_ticker, co.figi_name, y.symbol AS yahoo_symbol,
        a.buy_value_sek, a.sell_value_sek, a.net_value_sek,
        a.tx_count, a.buyer_count, a.seller_count, a.n_unverifiable,
        mc.market_cap_sek AS market_cap,
@@ -105,6 +125,7 @@ SELECT a.lei, a.period_start, a.period_end,
             THEN a.net_value_sek / mc.market_cap_sek END AS pct_of_mcap
   FROM agg_company_period a
   LEFT JOIN company co ON co.lei = a.lei
+  LEFT JOIN yahoo_symbol y ON y.isin = co.primary_isin
   LEFT JOIN market_cap_current mc ON mc.lei = a.lei
  WHERE a.period = ?
 """
@@ -116,7 +137,8 @@ def leaderboard(conn: sqlite3.Connection, period: str) -> schemas.Leaderboard:
     rows = conn.execute(_LEADERBOARD_SQL, (period,)).fetchall()
     entries = [
         schemas.LeaderboardEntry(
-            lei=r["lei"], name=r["name"], ticker=r["ticker"] or None,
+            lei=r["lei"], name=r["name"],
+            ticker=_ticker(r["raw_ticker"], r["figi_name"], r["yahoo_symbol"]),
             net_value_sek=r["net_value_sek"], buy_value_sek=r["buy_value_sek"],
             sell_value_sek=r["sell_value_sek"], tx_count=r["tx_count"],
             buyer_count=r["buyer_count"], seller_count=r["seller_count"],
@@ -144,14 +166,16 @@ def leaderboard(conn: sqlite3.Connection, period: str) -> schemas.Leaderboard:
 def company_index(conn: sqlite3.Connection) -> schemas.CompanyIndex:
     """Complete company index (the client sorts and filters)."""
     rows = conn.execute(
-        "SELECT lei, display_name, raw_ticker FROM company ORDER BY display_name"
+        "SELECT c.lei, c.display_name, c.raw_ticker, c.figi_name, y.symbol AS yahoo_symbol "
+        "FROM company c LEFT JOIN yahoo_symbol y ON y.isin = c.primary_isin "
+        "ORDER BY c.display_name"
     ).fetchall()
     return schemas.CompanyIndex(
         count=len(rows),
         companies=[
             schemas.CompanyIndexEntry(
                 lei=r["lei"], name=r["display_name"] or r["lei"],
-                ticker=r["raw_ticker"] or None,
+                ticker=_ticker(r["raw_ticker"], r["figi_name"], r["yahoo_symbol"]),
             )
             for r in rows
         ],
@@ -186,7 +210,9 @@ def _tx(r: sqlite3.Row) -> schemas.CompanyTransaction:
 
 def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail | None:
     co = conn.execute(
-        "SELECT lei, display_name, raw_ticker, primary_isin FROM company WHERE lei = ?",
+        "SELECT c.lei, c.display_name, c.raw_ticker, c.figi_name, c.primary_isin, "
+        "y.symbol AS yahoo_symbol FROM company c "
+        "LEFT JOIN yahoo_symbol y ON y.isin = c.primary_isin WHERE c.lei = ?",
         (lei,),
     ).fetchone()
     if co is None:
@@ -223,7 +249,8 @@ def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail 
 
     return schemas.CompanyDetail(
         lei=co["lei"], name=co["display_name"] or co["lei"],
-        ticker=co["raw_ticker"] or None, primary_isin=co["primary_isin"],
+        ticker=_ticker(co["raw_ticker"], co["figi_name"], co["yahoo_symbol"]),
+        primary_isin=co["primary_isin"],
         market_cap=mc["market_cap_sek"] if mc else None,
         market_cap_as_of=mc["as_of"] if mc else None,
         verification="ok" if (mc and mc["market_cap_sek"] is not None) else "unverifiable",

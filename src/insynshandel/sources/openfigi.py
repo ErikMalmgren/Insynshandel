@@ -9,9 +9,10 @@ Stockholm main-market listings, so every First North, Spotlight and NGM company
 came back empty. Instead we take all equity listings and pick the Swedish home
 venue ourselves (:data:`HOME_EXCH`).
 
-``format_ticker`` is Yahoo-specific string shaping (``.ST`` suffix, SDB handling,
-A/B share classes). It is the Yahoo provider's fallback when Yahoo's own ISIN
-search has no answer.
+``display_ticker`` puts the share class back on OpenFIGI's ticker (SDB handling,
+A/B share classes): ``'TELE2B'`` → ``'TELE2-B'``, the form the site shows.
+``format_ticker`` adds Yahoo's ``.ST`` to that; it is the Yahoo provider's
+fallback when Yahoo's own ISIN search has no answer.
 """
 
 from __future__ import annotations
@@ -84,14 +85,15 @@ def _result(isin: str, answer: dict) -> FigiResult:
 
 # OpenFIGI's Stockholm tickers carry no class separator ('SAABB', 'HMB'); its name
 # does: 'SAAB AB-B', 'HENNES & MAURITZ AB-B SHS', 'SSAB AB - B SHARES',
-# 'INVESTOR AB SER. B'.
+# 'INVESTOR AB SER. B', 'FASTIGHETS AB BALDER-B SHRS', 'VITEC SOFTWARE GROUP AB-B SH'.
 _CLASS_IN_NAME = re.compile(
-    r"(?:-\s*|\b(?:SER|SERIES|CLASS)\.?\s*)([A-D])(?:\s+(?:SHS|SHARES))?$"
+    r"(?:-\s*|\b(?:SER|SERIES|CLASS)\.?\s*)([A-D])"
+    r"(?:\s+(?:SH|SHS|SHR|SHRS|SHARE|SHARES))?$"
 )
 
 
-def format_ticker(raw: str, name: str) -> str:
-    """`'SAABB'` + `'SAAB AB-B'` → `'SAAB-B.ST'`. Yahoo/Stockholm.
+def display_ticker(raw: str, name: str) -> str:
+    """`'SAABB'` + `'SAAB AB-B'` → `'SAAB-B'`. The class, dash-separated.
 
     A class suffix is split off only when ``name`` (OpenFIGI's) names the class.
     Guessing from a trailing A–D turned TELIA into TELI-A and SAND into SAN-D.
@@ -99,23 +101,28 @@ def format_ticker(raw: str, name: str) -> str:
     raw = (raw or "").strip().upper()
     name = (name or "").strip().upper()
 
-    # 1) SDB depository shares: 'ALIV SDB' -> 'ALIV-SDB.ST'
+    # 1) SDB depository shares: 'ALIV SDB' -> 'ALIV-SDB'
     if " SDB" in raw or " SDB" in name or raw.endswith("SDB"):
         s = raw.replace(" SDB", "-SDB").replace(" ", "-")
         if s.endswith("SDB") and not s.endswith("-SDB"):
             s = s[:-3] + "-SDB"
-        return s + ".ST"
+        return s
 
-    # 2) an existing space is a share-class separator: 'INVE B' -> 'INVE-B.ST'
+    # 2) an existing space is a share-class separator: 'INVE B' -> 'INVE-B'
     if " " in raw:
-        return raw.replace(" ", "-") + ".ST"
+        return raw.replace(" ", "-")
 
     # 3) the name's class: 'SAAB AB-B' / 'NCC AB SER. B' -> split the matching letter
     m = _CLASS_IN_NAME.search(name)
     if m and len(raw) > 1 and raw.endswith(m.group(1)):
-        return raw[:-1] + "-" + raw[-1] + ".ST"
+        return raw[:-1] + "-" + raw[-1]
 
-    return raw + ".ST"
+    return raw
+
+
+def format_ticker(raw: str, name: str) -> str:
+    """`'SAABB'` + `'SAAB AB-B'` → `'SAAB-B.ST'`. Yahoo/Stockholm."""
+    return display_ticker(raw, name) + ".ST"
 
 
 class OpenFIGIClient:

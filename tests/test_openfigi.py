@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 import requests
 
-from insynshandel.sources.openfigi import OpenFIGIClient, format_ticker, pick_home
+from insynshandel.sources.openfigi import (
+    OpenFIGIClient,
+    display_ticker,
+    format_ticker,
+    pick_home,
+)
 
 MAPPING = json.loads(
     (Path(__file__).parent / "fixtures" / "openfigi_mapping.json").read_text()
@@ -137,6 +142,12 @@ def test_batch_size_follows_the_api_key(monkeypatch):
         ("ATCOA", "ATLAS COPCO AB-A SHS", "ATCO-A.ST"),
         ("TRANB", "TRANSFERATOR AB-B", "TRAN-B.ST"),
         ("NCCB", "NCC AB SER. B", "NCC-B.ST"),
+        ("TELE2B", "TELE2 AB-B SHS", "TELE2-B.ST"),
+        ("BALDB", "FASTIGHETS AB BALDER-B SHRS", "BALD-B.ST"),
+        ("COREB", "COREM PROPERTY GROUP-B SHARE", "CORE-B.ST"),
+        ("K2AB", "K2A KNAUST & ANDERSSON-B SHR", "K2A-B.ST"),
+        ("VITB", "VITEC SOFTWARE GROUP AB-B SH", "VIT-B.ST"),
+        ("PEABB", "PEAB AB-CLASS B", "PEAB-B.ST"),
         # no class in the name: never split on a trailing A–D
         ("TELIA", "TELIA CO AB", "TELIA.ST"),
         ("SAND", "SANDVIK AB", "SAND.ST"),
@@ -162,3 +173,18 @@ def test_class_in_name_must_match_the_tickers_last_letter():
 
 def test_lowercase_and_whitespace_normalised():
     assert format_ticker("  inve b  ", "investor ab ser. b") == "INVE-B.ST"
+
+
+@pytest.mark.parametrize(
+    "raw,name,expected",
+    [
+        ("TELE2B", "TELE2 AB-B SHS", "TELE2-B"),
+        ("INVE B", "INVESTOR AB SER. B", "INVE-B"),
+        ("ALIV SDB", "", "ALIV-SDB"),
+        ("TELIA", "TELIA CO AB", "TELIA"),
+        ("TELE2B", "", "TELE2B"),    # no name (a v1 row): never guess the class
+    ],
+)
+def test_display_ticker_is_format_ticker_without_the_suffix(raw, name, expected):
+    assert display_ticker(raw, name) == expected
+    assert format_ticker(raw, name) == expected + ".ST"

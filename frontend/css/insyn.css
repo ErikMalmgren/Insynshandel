@@ -30,15 +30,6 @@
 
     --col:      72ch;
     --step:     1.6rem;
-
-    /* The table's own measure. --col is a measure for prose and eleven
-     * columns do not fit in 96ch; rather than bend the column rules that make
-     * about.html readable, the board gets a container of its own.
-     *
-     * 128ch is measured, not chosen: it is what the eleven columns need at
-     * 0.75ch of cell padding, so nothing is clipped on a 1280px display. The
-     * .scroller behind it is what makes a narrower one work. */
-    --board:    128ch;
 }
 
 @media (prefers-color-scheme: light) {
@@ -59,7 +50,7 @@
 /* ---------- viewport scale ----------
  *
  * Copied wholesale. `ch` scales with font-size, so --col and the root size
- * compound; --board rides the same scale for free.
+ * compound.
  *
  * `rem` in a media query always resolves against the initial 16px root, so
  * these breakpoints are unaffected by the font-size they themselves set.
@@ -117,15 +108,16 @@ body {
     margin: 0 auto;
 }
 
-/* The leaderboard's container. Wider than the prose measure, and the only
- * place --board is used. */
+/* The app pages' container: the whole viewport, less the body's gutter. This
+ * is a power-user tool, and every column of the board and the transaction
+ * list is worth more than a margin. On a narrower display the .scroller
+ * takes up what does not fit. */
 .wrap-wide {
-    max-width: var(--board);
-    margin: 0 auto;
+    max-width: none;
 }
 
-/* Prose inside a wide container still wants the prose measure. The board is
- * the only thing that earns 120ch. */
+/* Prose inside a wide container still wants the prose measure. The tables
+ * are the only thing that earns the full width. */
 .prose {
     max-width: var(--col);
 }
@@ -338,7 +330,7 @@ code {
 /* ═══════════════ app ═══════════════
  *
  * Everything below is new for insyn. Nothing above this line differs from
- * terminal.css except --board, .wrap-wide and the .kv column width.
+ * terminal.css except .wrap-wide and the .kv column width.
  */
 
 /* ---------- status lines ----------

@@ -128,6 +128,41 @@ def test_company_index_carries_no_person_data(built):
     assert set(ci.companies[0].model_dump()) == {"lei", "name", "ticker"}
 
 
+def _exported_tickers(conn, lei):
+    return {
+        next(e for e in reads.leaderboard(conn, "all").entries if e.lei == lei).ticker,
+        next(c for c in reads.company_index(conn).companies if c.lei == lei).ticker,
+        reads.company_detail(conn, lei).ticker,
+    }
+
+
+@pytest.mark.parametrize(
+    "raw,figi_name,yahoo,expected",
+    [
+        ("TELE2B", "TELE2 AB-B SHS", None, "TELE2-B"),     # the class from the name
+        ("BEIJB", "BEIJER REF AB", "BEIJ-B.ST", "BEIJ-B"),  # the class from Yahoo
+        ("BEIJB", "BEIJER REF AB", "OTHR-A.ST", "BEIJB"),   # not the same ticker
+        ("BEIJB", "BEIJER REF AB", None, "BEIJB"),          # no class anywhere
+    ],
+)
+def test_ticker_is_exported_with_the_class_dash_separated(built, raw, figi_name, yahoo,
+                                                          expected):
+    lei, isin = built.execute(
+        "SELECT a.lei, c.primary_isin FROM agg_company_period a "
+        "JOIN company c ON c.lei = a.lei "
+        "WHERE a.period = 'all' AND c.primary_isin IS NOT NULL LIMIT 1"
+    ).fetchone()
+    built.execute("UPDATE company SET raw_ticker = ?, figi_name = ? WHERE lei = ?",
+                  (raw, figi_name, lei))
+    if yahoo:
+        built.execute("INSERT INTO yahoo_symbol (isin, symbol, looked_up_at) "
+                      "VALUES (?, ?, date('now'))", (isin, yahoo))
+    assert _exported_tickers(built, lei) == {expected}
+    # the stored value stays OpenFIGI's verbatim
+    assert built.execute("SELECT raw_ticker FROM company WHERE lei = ?",
+                         (lei,)).fetchone()[0] == raw
+
+
 # ── export_static ─────────────────────────────────────────────────────────
 def test_export_connection_is_read_only(built, tmp_path):
     """`insyn export-static` reads through `db.connect(read_only=True)`: reads

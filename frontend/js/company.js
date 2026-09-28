@@ -11,8 +11,8 @@
  * companies.json carries, which is not an accident.
  */
 
-import { url, getJSON, fmt, el, clear, setStatus, moneyCell, dashCell, stamp, param }
-    from './insyn.js?v=1';
+import { url, getJSON, fmt, el, clear, setStatus, moneyCell, dashCell, stamp, param,
+    tickerMatches } from './insyn.js?v=2';
 
 /* agg_company_period is written per window only when counted transactions
  * exist there, and the export orders the array alphabetically — '365d', '90d',
@@ -68,7 +68,7 @@ async function renderPicker() {
         const rows = index.companies.filter((c) =>
             !needle
             || c.name.toLocaleLowerCase('sv').includes(needle)
-            || (c.ticker || '').toLocaleLowerCase('sv').includes(needle));
+            || tickerMatches(c.ticker, needle));
 
         clear(list);
         const frag = document.createDocumentFragment();

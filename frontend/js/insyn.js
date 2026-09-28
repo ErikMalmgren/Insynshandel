@@ -68,10 +68,18 @@ export function getJSON(target) {
  *
  * Money is a plain number in the JSON by design — the export never
  * formats it. Compact in the cell, full value in `title`.
+ *
+ * md (miljard, 10⁹) is the largest unit. sv-SE compact steps up to bn
+ * (biljon, 10¹²) past 999,9 md, and a column mixing the two is a
+ * factor-of-a-thousand misread waiting to happen — worse, English readers
+ * take bn for 10⁹. So from 10⁹ up the number is written in md: 1 200 md.
  */
 
+const MD = 1e9;
 const nfCompact       = new Intl.NumberFormat('sv-SE', { notation: 'compact', maximumFractionDigits: 1 });
 const nfCompactSigned = new Intl.NumberFormat('sv-SE', { notation: 'compact', maximumFractionDigits: 1, signDisplay: 'exceptZero' });
+const nfMd            = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1 });
+const nfMdSigned      = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 1, signDisplay: 'exceptZero' });
 const nfFull          = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 0 });
 const nfPrice         = new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 4 });
 const nfInt           = new Intl.NumberFormat('sv-SE');
@@ -82,8 +90,8 @@ export const fmt = {
     int:     (n) => nfInt.format(n),
     full:    (n) => nfFull.format(n),
     price:   (n) => nfPrice.format(n),
-    compact: (n) => nfCompact.format(n),
-    signed:  (n) => nfCompactSigned.format(n),
+    compact: (n) => (Math.abs(n) >= MD ? `${nfMd.format(n / MD)}\u00a0md` : nfCompact.format(n)),
+    signed:  (n) => (Math.abs(n) >= MD ? `${nfMdSigned.format(n / MD)}\u00a0md` : nfCompactSigned.format(n)),
     pct:     (n) => nfPct.format(n),
 };
 
@@ -183,4 +191,12 @@ export function stamp(iso) {
 
 export function param(name) {
     return new URLSearchParams(window.location.search).get(name);
+}
+
+/* Tickers render with the share class dash-separated (TELE2-B), but people
+ * type them either way, so the dash and any space come out of both sides. */
+export function tickerMatches(ticker, needle) {
+    const bare = (s) => s.toLocaleLowerCase('sv').replace(/[\s-]/g, '');
+    const n = bare(needle);
+    return n !== '' && bare(ticker || '').includes(n);
 }
