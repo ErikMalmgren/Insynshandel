@@ -97,45 +97,96 @@ def test_fx_error_is_recorded_not_raised(db_conn):
 
 # ── OpenFIGI ──────────────────────────────────────────────────────────────
 class FakeFigi:
-    def __init__(self, answers):
+    def __init__(self, answers, batch_size=1):
         self.answers = answers  # isin -> FigiResult | Exception
+        self.batch_size = batch_size
+        self.batches: list[list[str]] = []
 
-    def map_isin(self, isin):
+    def map_isins(self, isins):
         from insynshandel.sources.openfigi import FigiResult
 
-        a = self.answers.get(isin, FigiResult(isin, None, None, None, None, None))
-        if isinstance(a, Exception):
-            raise a
-        return a
+        self.batches.append(list(isins))
+        out = []
+        for isin in isins:
+            a = self.answers.get(isin, FigiResult(isin, None, None, None, None, None))
+            if isinstance(a, Exception):
+                raise a  # a transport failure takes the whole request down
+            out.append(a)
+        return out
+
+    @property
+    def seen(self) -> list[str]:
+        return [i for b in self.batches for i in b]
+
+
+def _hit(isin, raw, name, exch="SS"):
+    from insynshandel.sources.openfigi import HOME_EXCH, FigiResult, format_ticker
+
+    return FigiResult(isin, format_ticker(raw, name), raw, name, exch, HOME_EXCH[exch])
+
+
+def _write_rows(conn, rows):
+    """Ingest hand-made FI rows: (lei, isin, 'YYYY-MM-DD', instrumenttyp)."""
+    prs = []
+    for i, (lei, isin, txdate, itype) in enumerate(rows):
+        f = {n: "" for n in fi.FIELD_NAMES}
+        f.update(publiceringsdatum=f"{txdate} 10:00:00", transaktionsdatum=f"{txdate} 00:00:00",
+                 lei_kod=lei, emittent=f"{lei} AB", karaktar="Förvärv", instrumenttyp=itype,
+                 isin=isin, volym="1", volymsenhet="Antal", pris="1", valuta="SEK",
+                 status="Aktuell", person_i_ledande_stallning="P")
+        prs.append(fi.ParsedRow(fi.row_hash([f[n] for n in fi.FIELD_NAMES]) + str(i), 0, f))
+    leaf = fi.Leaf(date(2016, 7, 1), date(2027, 1, 1), prs, truncated=False)
+    ingest.write_leaf(conn, ingest._open_batch(conn, "t", leaf), leaf)
+    normalize.normalize(conn)
 
 
 def test_figi_only_queries_unknown_isins(db_conn, sample_export_bytes):
-    from insynshandel.sources.openfigi import FigiResult
-
     _ingest(db_conn, sample_export_bytes)
     known = db_conn.execute(
-        "SELECT isin FROM transaction_norm WHERE isin <> '' LIMIT 1"
+        "SELECT isin FROM transaction_norm WHERE isin <> '' AND instrument_type = 'Aktie' "
+        "LIMIT 1"
     ).fetchone()[0]
     db_conn.execute(
-        "INSERT INTO figi_lookup (isin, ticker, looked_up_at, attempts) "
-        "VALUES (?, 'X.ST', date('now'), 1)", (known,),
+        "INSERT INTO figi_lookup (isin, ticker, looked_up_at, attempts, resolver_version) "
+        "VALUES (?, 'X.ST', date('now'), 1, ?)", (known, reference.FIGI_RESOLVER_VERSION),
     )
 
-    class Recorder(FakeFigi):
-        def __init__(self):
-            super().__init__({})
-            self.seen: list[str] = []
-
-        def map_isin(self, isin):
-            self.seen.append(isin)
-            return FigiResult(isin, None, None, None, None, None)
-
-    rec = Recorder()
+    rec = FakeFigi({})
     reference.figi(db_conn, rec)
+    assert rec.seen                                    # the others were asked
     assert known not in rec.seen                       # resolved ISIN not re-queried
     assert db_conn.execute(                            # its row is untouched
         "SELECT ticker FROM figi_lookup WHERE isin = ?", (known,)
     ).fetchone()["ticker"] == "X.ST"
+
+
+def test_figi_skips_instruments_that_are_never_the_share(db_conn, sample_export_bytes):
+    _ingest(db_conn, sample_export_bytes)
+    rec = FakeFigi({})
+    reference.figi(db_conn, rec)
+    only_other = {r["isin"] for r in db_conn.execute(
+        "SELECT isin FROM transaction_norm WHERE isin <> '' GROUP BY isin "
+        "HAVING SUM(COALESCE(instrument_type, '') IN "
+        "('Aktie', 'Depåbevis', 'Kapitalandelsbevis', '')) = 0"
+    )}
+    assert only_other                                  # the fixture has bonds/warrants
+    assert not only_other & set(rec.seen)
+
+
+def test_figi_reasks_an_older_resolver_version_in_place(db_conn, sample_export_bytes):
+    _ingest(db_conn, sample_export_bytes)
+    isin = reference._isins_to_resolve(db_conn)[0]
+    db_conn.execute(  # a v1 answer: a bond "ticker", attempts nearly used up
+        "INSERT INTO figi_lookup (isin, ticker, raw_ticker, exch_code, looked_up_at, "
+        "attempts, resolver_version) VALUES (?, 'B.ST', 'SWEDA 11 04/26/19', "
+        "'NOMX STOCKHOLM', date('now'), 4, 1)", (isin,),
+    )
+    reference.figi(db_conn, FakeFigi({isin: _hit(isin, "SAABB", "SAAB AB-B")}))
+    row = db_conn.execute("SELECT * FROM figi_lookup WHERE isin = ?", (isin,)).fetchone()
+    assert (row["raw_ticker"], row["exch_code"], row["mic_code"]) == ("SAABB", "SS", "XSTO")
+    assert row["resolver_version"] == reference.FIGI_RESOLVER_VERSION
+    assert row["attempts"] == 1                        # a new resolver starts over
+    assert isin not in reference._isins_to_resolve(db_conn)
 
 
 def test_figi_negative_is_cached(db_conn, sample_export_bytes):
@@ -150,13 +201,9 @@ def test_figi_negative_is_cached(db_conn, sample_export_bytes):
     assert len(rows) == 3  # NULL rows written so they are not re-queried
 
 
-def test_figi_progress_fires_once_per_isin_including_errors(db_conn, sample_export_bytes):
+def test_figi_progress_fires_once_per_batch_including_errors(db_conn, sample_export_bytes):
     _ingest(db_conn, sample_export_bytes)
-    isins = [
-        r["isin"] for r in db_conn.execute(
-            "SELECT DISTINCT isin FROM transaction_norm WHERE isin <> '' LIMIT 3"
-        )
-    ]
+    isins = reference._isins_to_resolve(db_conn)[:3]
     fake = FakeFigi({isins[0]: ConnectionError("reset")})   # 1 error, 2 negatives
     seen: list[tuple[int, int, int, int]] = []
     s = reference.figi(
@@ -165,18 +212,26 @@ def test_figi_progress_fires_once_per_isin_including_errors(db_conn, sample_expo
             (done, total, fs.negative, fs.transport_errors)
         ),
     )
-    assert [d for d, *_ in seen] == [1, 2, 3]        # a tick per ISIN, in order
+    assert [d for d, *_ in seen] == [1, 2, 3]        # a tick per batch, in order
     assert {t for _, t, *_ in seen} == {3}           # total is the asked count
-    assert seen[-1][2:] == (s.negative, s.transport_errors)  # live summary
+    assert seen[-1][2:] == (s.negative, s.transport_errors) == (2, 1)  # live summary
+
+
+def test_figi_batches_and_a_failed_batch_counts_every_isin(db_conn, sample_export_bytes):
+    _ingest(db_conn, sample_export_bytes)
+    isins = reference._isins_to_resolve(db_conn)[:3]
+    fake = FakeFigi({isins[0]: ConnectionError("reset")}, batch_size=2)
+    ticks: list[int] = []
+    s = reference.figi(db_conn, fake, limit=3,
+                       progress=lambda done, total, fs: ticks.append(done))
+    assert fake.batches == [isins[:2], isins[2:]]
+    assert ticks == [2, 3]
+    assert (s.transport_errors, s.negative) == (2, 1)
 
 
 def test_figi_transport_error_writes_no_negative_row(db_conn, sample_export_bytes):
     _ingest(db_conn, sample_export_bytes)
-    isins = [
-        r["isin"] for r in db_conn.execute(
-            "SELECT DISTINCT isin FROM transaction_norm WHERE isin <> '' LIMIT 2"
-        )
-    ]
+    isins = reference._isins_to_resolve(db_conn)[:2]
     fake = FakeFigi({isins[0]: ConnectionError("reset")})
     s = reference.figi(db_conn, fake, limit=2)
     assert s.transport_errors == 1
@@ -230,6 +285,35 @@ def test_primary_isin_prefers_aktie_but_falls_back(db_conn, sample_export_bytes)
                 "SELECT COUNT(*) FROM transaction_norm WHERE lei = ? AND isin = ? "
                 "AND instrument_type = 'Aktie'", (r["lei"], r["primary_isin"]),
             ).fetchone()[0] > 0
+
+
+def test_listed_isin_beats_a_busier_pre_split_isin(db_conn):
+    today = reference.config.today()
+    recent = (today - timedelta(days=30)).isoformat()
+    old = today.replace(year=today.year - 3).isoformat()
+    # SAAB's shape: the old ISIN has the history and is still misreported lately
+    _write_rows(db_conn, [("LEI1", "SE0000000OLD", old, "Aktie")] * 8
+                + [("LEI1", "SE0000000OLD", recent, "Aktie")] * 3
+                + [("LEI1", "SE0000000NEW", recent, "Aktie")] * 2)
+    reference.figi(db_conn, FakeFigi({"SE0000000NEW": _hit("SE0000000NEW", "SAABB",
+                                                          "SAAB AB-B")}))
+    reference.build_companies(db_conn)
+    co = db_conn.execute("SELECT * FROM company WHERE lei = 'LEI1'").fetchone()
+    assert (co["primary_isin"], co["raw_ticker"], co["figi_name"]) == (
+        "SE0000000NEW", "SAABB", "SAAB AB-B")
+    assert co["ticker_source"] == "openfigi"
+
+
+def test_a_bond_answer_never_becomes_the_ticker(db_conn):
+    _write_rows(db_conn, [("LEI2", "SE0000000BND", "2026-01-02", "Aktie")])
+    db_conn.execute(  # what the v1 resolver cached for bond ISINs
+        "INSERT INTO figi_lookup (isin, ticker, raw_ticker, exch_code, mic_code, "
+        "looked_up_at) VALUES ('SE0000000BND', 'HARMNY-F.ST', 'HARMNY F 02/13/29', "
+        "'NOMX STOCKHOLM', 'XSTO', date('now'))"
+    )
+    reference.build_companies(db_conn)
+    co = db_conn.execute("SELECT * FROM company WHERE lei = 'LEI2'").fetchone()
+    assert co["raw_ticker"] is None and co["ticker_source"] is None
 
 
 def test_name_variants_kept_for_search(db_conn, sample_export_bytes):
@@ -339,9 +423,9 @@ def test_yahoo_ticks_only_over_companies_it_can_address(monkeypatch):
         ),
     )
     companies = [
-        Company("L1", "One AB", None, "ONE B", None, None),      # addressable
+        Company("L1", "One AB", None, "ONE B", "XSTO", "SS"),    # addressable
         Company("L2", "Two AB", None, None, None, None),         # no ticker
-        Company("L3", "Three AB", None, "THREE", None, None),    # addressable
+        Company("L3", "Three AB", None, "THREE", "FNSE", "SF"),  # addressable
     ]
     ticks: list[tuple[int, int]] = []
     provider.fetch(companies, progress=lambda d, t: ticks.append((d, t)))
@@ -387,3 +471,98 @@ def test_non_sek_market_cap_converted(companies_built):
     ).fetchone()
     assert row["currency"] == "USD"
     assert row["market_cap_sek"] == pytest.approx(9_500_000.0)
+
+
+# ── Yahoo symbols ─────────────────────────────────────────────────────────
+@pytest.fixture
+def listed(db_conn):
+    """Three companies: Nasdaq Stockholm, First North, NGM."""
+    _write_rows(db_conn, [("LSS", "SE00000000SS", "2026-01-02", "Aktie"),
+                          ("LSF", "SE00000000SF", "2026-01-02", "Aktie"),
+                          ("LNG", "SE00000000NG", "2026-01-02", "Aktie")])
+    reference.figi(db_conn, FakeFigi({
+        "SE00000000SS": _hit("SE00000000SS", "SAABB", "SAAB AB-B", "SS"),
+        "SE00000000SF": _hit("SE00000000SF", "TSEC", "TEMPEST SECURITY AB", "SF"),
+        "SE00000000NG": _hit("SE00000000NG", "SDS", "SEAMLESS", "NG"),
+    }))
+    reference.build_companies(db_conn)
+    return db_conn
+
+
+def test_yahoo_symbols_asks_once_and_skips_ngm(listed):
+    asked: list[str] = []
+
+    def search(isin):
+        asked.append(isin)
+        return "SAAB-B.ST" if isin == "SE00000000SS" else None
+
+    s = reference.yahoo_symbols(listed, search)
+    assert sorted(asked) == ["SE00000000SF", "SE00000000SS"]  # NG is not on Yahoo
+    assert (s.found, s.missing) == (1, 1)
+    reference.yahoo_symbols(listed, search)
+    assert len(asked) == 2                              # negatives cached too
+
+
+def test_yahoo_symbols_transport_errors_are_not_cached_and_stop_early(listed, monkeypatch):
+    monkeypatch.setattr(reference, "_YAHOO_MAX_CONSECUTIVE_ERRORS", 1)
+
+    def down(isin):
+        raise ConnectionError("429")
+
+    s = reference.yahoo_symbols(listed, down)
+    assert s.gave_up and s.transport_errors == 1
+    assert listed.execute("SELECT COUNT(*) FROM yahoo_symbol").fetchone()[0] == 0
+
+
+def test_yahoo_symbol_precedence(listed):
+    from insynshandel.sources.marketcap.yahoo import YahooProvider
+
+    reference.yahoo_symbols(listed, lambda isin: "SAAB-B.ST" if isin.endswith("SS") else None)
+    listed.executemany(
+        "INSERT INTO ticker_override (lei, provider, symbol, note) VALUES (?, ?, ?, '')",
+        [("LNG", "", "SDS.ST")],
+    )
+    sym = {c.lei: YahooProvider().symbol_for(c) for c in reference._companies(listed)}
+    assert sym == {
+        "LSS": "SAAB-B.ST",   # Yahoo's own answer
+        "LSF": "TSEC.ST",     # Yahoo had none: formatter on OpenFIGI's ticker + name
+        "LNG": "SDS.ST",      # NGM gets nothing, unless overridden
+    }
+
+    listed.executemany(
+        "INSERT INTO ticker_override (lei, provider, symbol, note) VALUES (?, ?, ?, '')",
+        [("LSS", "yahoo", "OTHER.ST"), ("LSF", "", "")],
+    )
+    sym = {c.lei: YahooProvider().symbol_for(c) for c in reference._companies(listed)}
+    assert sym["LSS"] == "OTHER.ST"   # a manual row beats the search
+    assert sym["LSF"] is None         # '' = checked, no symbol
+
+
+def test_all_provider_override_marks_the_company_manual(db_conn):
+    _write_rows(db_conn, [("LEI3", "SE000000NONE", "2026-01-02", "Aktie")])
+    db_conn.execute("INSERT INTO ticker_override (lei, provider, symbol, note) "
+                    "VALUES ('LEI3', '', 'ABC.ST', '')")
+    reference.build_companies(db_conn)
+    assert db_conn.execute(
+        "SELECT ticker_source FROM company WHERE lei = 'LEI3'"
+    ).fetchone()[0] == "manual"
+
+
+def test_search_symbol_raises_on_a_swallowed_yahoo_error(monkeypatch):
+    import yfinance as yf
+
+    from insynshandel.sources.marketcap.yahoo import search_symbol
+
+    class Answer:
+        def __init__(self, response):
+            self.response = response
+            self.quotes = response.get("quotes", [])
+
+    monkeypatch.setattr(yf, "Search", lambda *a, **k: Answer(
+        {"quotes": [{"symbol": "SAABB.F"}, {"symbol": "SAAB-B.ST"}]}))
+    assert search_symbol("SE0021921269") == "SAAB-B.ST"   # the Stockholm one
+    monkeypatch.setattr(yf, "Search", lambda *a, **k: Answer({"quotes": []}))
+    assert search_symbol("SE0009994445") is None          # a real "no match"
+    monkeypatch.setattr(yf, "Search", lambda *a, **k: Answer({}))
+    with pytest.raises(RuntimeError):                     # faulty body, not a negative
+        search_symbol("SE0021921269")

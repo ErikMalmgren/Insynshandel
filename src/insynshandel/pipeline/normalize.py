@@ -104,6 +104,7 @@ def normalize(conn: sqlite3.Connection) -> NormalizeSummary:
     batch: list[tuple] = []
     for row in src:
         f = {name: (row[name] or "").strip() for name in fi.FIELD_NAMES}
+        f["isin"] = f["isin"].upper()  # a few filings say 'se0001234567'
 
         published_at = f["publiceringsdatum"]
         published_date = published_at.split(" ", 1)[0]

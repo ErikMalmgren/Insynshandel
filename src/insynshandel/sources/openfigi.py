@@ -1,10 +1,17 @@
 """OpenFIGI — ISIN → exchange ticker.
 
-Free, 25 requests/minute unauthenticated (2.4 s spacing); set ``OPENFIGI_API_KEY``
-to raise it. Only ever queried for ISINs with no ``figi_lookup`` row.
+Free, 25 requests/minute unauthenticated (2.4 s spacing, 10 jobs per request);
+set ``OPENFIGI_API_KEY`` to raise it (100 jobs per request). Queried for ISINs
+with no current ``figi_lookup`` answer.
 
-``format_ticker`` is Yahoo-specific string shaping (``.ST`` suffix, SDB handling, A/B share classes).
-It lives here for now; when a second provider lands it moves into ``yahoo.py``.
+The job is not filtered by MIC: a ``micCode: XSTO`` filter only ever finds Nasdaq
+Stockholm main-market listings, so every First North, Spotlight and NGM company
+came back empty. Instead we take all equity listings and pick the Swedish home
+venue ourselves (:data:`HOME_EXCH`).
+
+``format_ticker`` is Yahoo-specific string shaping (``.ST`` suffix, SDB handling,
+A/B share classes). It is the Yahoo provider's fallback when Yahoo's own ISIN
+search has no answer.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import requests
@@ -19,13 +27,21 @@ import requests
 from .. import config
 
 OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
-PREFERRED_MIC = "XSTO"  # Nasdaq Stockholm
 
-# Tickers that legitimately end in A/B/C/D and must NOT be split into `-X` forms.
-EXCLUDE_TICKERS = {"ABB", "ALFA", "ACA", "ACSA", "DIOS"}
+# Swedish home venues, in preference order: OpenFIGI exchCode -> MIC. A share
+# listed nowhere here (delisted, foreign, pre-split ISIN) has no usable answer —
+# the X1/EO/GR… composite and cross-listings it still maps to are not its home.
+HOME_EXCH: dict[str, str] = {
+    "SS": "XSTO",  # Nasdaq Stockholm
+    "SF": "FNSE",  # First North Sweden
+    "KA": "XSAT",  # Spotlight Stock Market
+    "NG": "XNGM",  # Nordic Growth Market, incl. Nordic SME
+}
 
 _UNAUTH_SPACING_S = 2.4
 _AUTH_SPACING_S = 0.3
+_UNAUTH_BATCH = 10
+_AUTH_BATCH = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +52,52 @@ class FigiResult:
     name: str | None
     exch_code: str | None
     mic_code: str | None
+    error: str | None = None  # OpenFIGI's per-job error, e.g. an invalid ISIN
+
+
+def pick_home(hits: Sequence[dict]) -> dict | None:
+    """The listing on the most preferred :data:`HOME_EXCH` venue, equities only
+    (a bond ISIN answers with a 'SWEDA 11 04/26/19'-style ticker)."""
+    equity = [h for h in hits if h.get("marketSector") == "Equity" and h.get("ticker")]
+    for exch in HOME_EXCH:
+        for h in equity:
+            if h.get("exchCode") == exch:
+                return h
+    return None
+
+
+def _result(isin: str, answer: dict) -> FigiResult:
+    hit = pick_home(answer.get("data") or [])
+    if hit is None:
+        return FigiResult(isin, None, None, None, None, None, answer.get("error"))
+    raw = hit["ticker"].strip()
+    name = hit.get("name")
+    return FigiResult(
+        isin=isin,
+        ticker=format_ticker(raw, name or ""),
+        raw_ticker=raw,
+        name=name,
+        exch_code=hit["exchCode"],
+        mic_code=HOME_EXCH[hit["exchCode"]],
+    )
+
+
+# OpenFIGI's Stockholm tickers carry no class separator ('SAABB', 'HMB'); its name
+# does: 'SAAB AB-B', 'HENNES & MAURITZ AB-B SHS', 'SSAB AB - B SHARES',
+# 'INVESTOR AB SER. B'.
+_CLASS_IN_NAME = re.compile(
+    r"(?:-\s*|\b(?:SER|SERIES|CLASS)\.?\s*)([A-D])(?:\s+(?:SHS|SHARES))?$"
+)
 
 
 def format_ticker(raw: str, name: str) -> str:
-    """`'INVE B'` + `'INVESTOR AB SER. B'` → `'INVE-B.ST'`. Yahoo/Stockholm."""
+    """`'SAABB'` + `'SAAB AB-B'` → `'SAAB-B.ST'`. Yahoo/Stockholm.
+
+    A class suffix is split off only when ``name`` (OpenFIGI's) names the class.
+    Guessing from a trailing A–D turned TELIA into TELI-A and SAND into SAN-D.
+    """
     raw = (raw or "").strip().upper()
-    name = (name or "").upper()
+    name = (name or "").strip().upper()
 
     # 1) SDB depository shares: 'ALIV SDB' -> 'ALIV-SDB.ST'
     if " SDB" in raw or " SDB" in name or raw.endswith("SDB"):
@@ -54,18 +110,9 @@ def format_ticker(raw: str, name: str) -> str:
     if " " in raw:
         return raw.replace(" ", "-") + ".ST"
 
-    # 3) derive the '-' from the name's 'ser. B' / 'class B'
-    m = re.search(r"\b(?:SER|SERIES|CLASS)\.?\s*([A-D])\b", name, re.IGNORECASE)
-    if m and raw.endswith(m.group(1)):
-        return raw[:-1] + "-" + raw[-1] + ".ST"
-
-    # 4) cautious heuristic: raw ends A/B/C/D, no '-' yet, not an excluded ticker
-    if (
-        raw.endswith(tuple("ABCD"))
-        and raw not in EXCLUDE_TICKERS
-        and len(raw) >= 4
-        and raw[-2] != raw[-1]
-    ):
+    # 3) the name's class: 'SAAB AB-B' / 'NCC AB SER. B' -> split the matching letter
+    m = _CLASS_IN_NAME.search(name)
+    if m and len(raw) > 1 and raw.endswith(m.group(1)):
         return raw[:-1] + "-" + raw[-1] + ".ST"
 
     return raw + ".ST"
@@ -81,6 +128,7 @@ class OpenFIGIClient:
         if self.api_key:
             self.session.headers["X-OPENFIGI-APIKEY"] = self.api_key
         self.spacing_s = _AUTH_SPACING_S if self.api_key else _UNAUTH_SPACING_S
+        self.batch_size = _AUTH_BATCH if self.api_key else _UNAUTH_BATCH
         self._last_at: float | None = None
 
     def _space(self) -> None:
@@ -89,11 +137,15 @@ class OpenFIGIClient:
             if wait > 0:
                 time.sleep(wait)
 
-    def map_isin(self, isin: str) -> FigiResult:
-        """Resolve one ISIN. A network failure raises; 'no match' returns a
+    def map_isins(self, isins: Sequence[str]) -> list[FigiResult]:
+        """Resolve up to :attr:`batch_size` ISINs in one request, answers in input
+        order. A network failure raises for the whole batch; 'no match' is a
         FigiResult with ``ticker=None`` (a cacheable negative)."""
+        if len(isins) > self.batch_size:
+            raise ValueError(f"{len(isins)} ISINs exceeds batch size {self.batch_size}")
         self._space()
-        body = [{"idType": "ID_ISIN", "idValue": isin, "micCode": PREFERRED_MIC}]
+        body = [{"idType": "ID_ISIN", "idValue": i, "marketSecDes": "Equity"}
+                for i in isins]
         resp = self.session.post(OPENFIGI_URL, json=body,
                                  timeout=config.REQUEST_TIMEOUT_S)
         self._last_at = time.monotonic()
@@ -101,17 +153,8 @@ class OpenFIGIClient:
             raise requests.HTTPError("OpenFIGI 429 — slow down")
         resp.raise_for_status()
 
-        hits = (resp.json() or [{}])[0].get("data") or []
-        if not hits:
-            return FigiResult(isin, None, None, None, None, None)
-        h = hits[0]
-        raw = (h.get("ticker") or "").strip()
-        name = h.get("name")
-        return FigiResult(
-            isin=isin,
-            ticker=format_ticker(raw, name or "") if raw else None,
-            raw_ticker=raw or None,
-            name=name,
-            exch_code=h.get("exchCode"),
-            mic_code=h.get("micCode") or PREFERRED_MIC,
-        )
+        answers = resp.json() or []
+        # answers are positional; a short list would misattribute every ISIN after it
+        if len(answers) != len(isins):
+            raise ValueError(f"OpenFIGI answered {len(answers)} jobs for {len(isins)}")
+        return [_result(i, a) for i, a in zip(isins, answers, strict=True)]

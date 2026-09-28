@@ -2,6 +2,10 @@
 
 `fetch()` never raises. Uses a `ThreadPoolExecutor(max_workers=5)` and the
 404/429/timeout error taxonomy.
+
+Symbol, first match wins: a `ticker_override` row; Yahoo's own answer for the
+ISIN (:func:`search_symbol`, cached in `yahoo_symbol` by `refdata`); else
+:func:`format_ticker` on OpenFIGI's ticker and name.
 """
 
 from __future__ import annotations
@@ -15,15 +19,45 @@ from .base import Company, FetchFailure, FetchProgress, MarketCapQuote
 
 log = logging.getLogger(__name__)
 
+# OpenFIGI home venues Yahoo quotes as '.ST'. NGM / Nordic SME ('NG') are not on
+# Yahoo at all — their ISIN search comes back empty.
+YAHOO_EXCH = ("SS", "SF", "KA")
+
+
+def search_symbol(isin: str) -> str | None:
+    """Yahoo's own symbol for an ISIN (`'SE0021921269'` → `'SAAB-B.ST'`), or None.
+    A transport failure raises."""
+    import yfinance as yf
+
+    found = yf.Search(
+        isin, max_results=5, news_count=0, lists_count=0, recommended=0,
+        timeout=config.REQUEST_TIMEOUT_S,
+    )
+    # yfinance swallows a non-JSON answer into {} (hide_exceptions defaults on);
+    # a real "no match" still carries an empty 'quotes'. Raise, so a throttled
+    # reply is retried instead of cached as a 90-day negative.
+    if "quotes" not in found.response:
+        raise RuntimeError(f"Yahoo search for {isin}: answer has no 'quotes'")
+    for q in found.quotes:
+        symbol = q.get("symbol") or ""
+        if symbol.endswith(".ST"):
+            return symbol
+    return None
+
 
 class YahooProvider:
     name = "yahoo"
 
     def symbol_for(self, company: Company) -> str | None:
-        if not company.raw_ticker:
+        # Called repeatedly (addressable counts, progress) — no network here.
+        manual = company.override_for(self.name)
+        if manual is not None:
+            return manual or None
+        if company.symbols.get(self.name):
+            return company.symbols[self.name]
+        if not company.raw_ticker or company.exch_code not in YAHOO_EXCH:
             return None
-        # Yahoo/Stockholm string shaping lives here, not in shared code.
-        return format_ticker(company.raw_ticker, company.display_name or "")
+        return format_ticker(company.raw_ticker, company.figi_name or "")
 
     def _one(self, company: Company) -> tuple[MarketCapQuote | None, FetchFailure | None]:
         import yfinance as yf

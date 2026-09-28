@@ -82,6 +82,23 @@ def _figi_progress(quiet: bool):
     )
 
 
+def _yahoo_progress(quiet: bool):
+    """Adapt :class:`_Progress` to ``reference.yahoo_symbols``'s (done, total, summary)."""
+    if quiet:
+        return None
+    meter = _Progress("yahoo symbols")
+    return lambda done, total, ys: meter(
+        done, total,
+        f"found={ys.found} missing={ys.missing} err={ys.transport_errors}",
+    )
+
+
+def _print_yahoo(ys: reference.YahooSymbolSummary, prefix: str) -> None:
+    print(f"{prefix}asked={ys.asked} found={ys.found} missing={ys.missing} "
+          f"transport_errors={ys.transport_errors}"
+          + (" (stopped early, rest next run)" if ys.gave_up else ""))
+
+
 def _fx_progress(quiet: bool):
     """``reference.fx``'s (done, total, detail) is already _Progress's signature."""
     return None if quiet else _Progress("fx")
@@ -287,6 +304,8 @@ def _cmd_refdata(args: argparse.Namespace) -> int:
                   f"negative={gs.negative} transport_errors={gs.transport_errors}")
         elif step == "marketcaps":
             reference.build_companies(conn)
+            _print_yahoo(reference.yahoo_symbols(conn, progress=_yahoo_progress(args.quiet)),
+                         "refdata yahoo symbols: ")
             try:
                 ms = reference.marketcaps(
                     conn, standalone=True, progress=_marketcap_progress(args.quiet))
@@ -325,6 +344,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         why = "--no-marketcaps" if args.no_marketcaps else "no company has a ticker yet"
         print(f"  marketcaps skipped ({why}) — every company will be 'unverifiable'")
     else:
+        _print_yahoo(reference.yahoo_symbols(conn, progress=_yahoo_progress(args.quiet)),
+                     "  yahoo symbols ")
         ms = reference.marketcaps(               # degraded => warn, continue
             conn, standalone=False, progress=_marketcap_progress(args.quiet))
         print(f"  marketcaps written={ms.written}"

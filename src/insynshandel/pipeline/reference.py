@@ -4,6 +4,7 @@ must never leave ``transaction_norm`` half-built.
 * :func:`fx` — Riksbank SWEA rates into ``fx_rate``.
 * :func:`figi` — OpenFIGI ISIN→ticker into ``figi_lookup``, unknowns only.
 * :func:`build_companies` — the LEI-keyed ``company`` entity + name variants.
+* :func:`yahoo_symbols` — Yahoo's ISIN→symbol into ``yahoo_symbol``, unknowns only.
 * :func:`marketcaps` — pluggable providers append ``market_cap`` snapshots.
 """
 
@@ -19,6 +20,7 @@ from .. import config
 from ..db import immediate
 from ..sources import openfigi, riksbank
 from ..sources.marketcap import Company, get_providers
+from ..sources.marketcap import yahoo as yahoo_source
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +82,19 @@ def fx(
 
 
 # ── OpenFIGI ───────────────────────────────────────────────────────────────
+# Bump to re-ask every cached answer once. v1: `micCode: XSTO` filter (missed
+# First North / Spotlight / NGM, cached bond "tickers"). v2: all equity
+# listings, Swedish home venue picked client-side.
+FIGI_RESOLVER_VERSION = 2
+
+# FI instrument types that can be a company's listed share ('' = 2016–2018 rows,
+# which carry no type). BTA, warrants, options, bonds and swaps never carry the
+# company's ticker; asking about them only burns the rate limit.
+_SHARE_TYPES = ("Aktie", "Depåbevis", "Kapitalandelsbevis", "")
+_SHARE_TYPES_SQL = ", ".join(f"'{t}'" for t in _SHARE_TYPES)
+_HOME_EXCH_SQL = ", ".join(f"'{e}'" for e in openfigi.HOME_EXCH)
+
+
 @dataclass
 class FigiSummary:
     asked: int = 0
@@ -88,25 +103,47 @@ class FigiSummary:
     transport_errors: int = 0
 
 
-# (done, total, live summary) — fired after every ISIN, transport errors included.
-# OpenFIGI is one request per ISIN at 2.4 s spacing unauthenticated, so a full run
-# is ~an hour; the CLI passes a printer so the terminal is not silent.
+# (done, total, live summary) — fired after every batch, transport errors
+# included. Unauthenticated OpenFIGI is 10 ISINs per request at 2.4 s spacing,
+# so a full re-run is ~15 minutes; the CLI passes a printer so the terminal is
+# not silent.
 FigiProgress = Callable[[int, int, FigiSummary], None]
 
 
 def _isins_to_resolve(conn: sqlite3.Connection) -> list[str]:
+    # most recently traded first: a run cut short has still done the companies
+    # the leaderboard shows
     return [
         r["isin"] for r in conn.execute(
-            """
-            SELECT DISTINCT n.isin FROM transaction_norm n
+            f"""
+            SELECT n.isin FROM transaction_norm n
             LEFT JOIN figi_lookup f ON f.isin = n.isin
             WHERE n.isin <> ''
+              AND COALESCE(n.instrument_type, '') IN ({_SHARE_TYPES_SQL})
               AND (f.isin IS NULL
+                   OR f.resolver_version < :version
                    OR (f.ticker IS NULL AND f.attempts < 5
                        AND f.looked_up_at < date('now', '-90 days')))
-            """
+            GROUP BY n.isin
+            ORDER BY MAX(n.transaction_date) DESC, n.isin
+            """,
+            {"version": FIGI_RESOLVER_VERSION},
         )
     ]
+
+
+_FIGI_UPSERT = """
+INSERT INTO figi_lookup (isin, ticker, raw_ticker, name, exch_code, mic_code,
+                         looked_up_at, attempts, last_error, resolver_version)
+VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+ON CONFLICT(isin) DO UPDATE SET ticker=excluded.ticker,
+  raw_ticker=excluded.raw_ticker, name=excluded.name,
+  exch_code=excluded.exch_code, mic_code=excluded.mic_code,
+  looked_up_at=excluded.looked_up_at, last_error=excluded.last_error,
+  attempts=CASE WHEN figi_lookup.resolver_version < excluded.resolver_version
+                THEN 1 ELSE figi_lookup.attempts + 1 END,
+  resolver_version=excluded.resolver_version
+"""
 
 
 def figi(
@@ -119,34 +156,31 @@ def figi(
         isins = isins[:limit]
     s = FigiSummary(asked=len(isins))
     now = config.now_local_iso()
-    for done, isin in enumerate(isins, start=1):
+    for start in range(0, len(isins), client.batch_size):
+        batch = isins[start:start + client.batch_size]
+        done = start + len(batch)
         try:
-            res = client.map_isin(isin)
+            results = client.map_isins(batch)
         except Exception as exc:  # noqa: BLE001 — transport failure: do NOT cache
-            s.transport_errors += 1
-            conn.execute(
+            s.transport_errors += len(batch)
+            conn.executemany(
                 "UPDATE figi_lookup SET last_error = ?, attempts = attempts + 1 "
-                "WHERE isin = ?", (str(exc)[:200], isin),
+                "WHERE isin = ?", [(str(exc)[:200], isin) for isin in batch],
             )
             if progress:
                 progress(done, s.asked, s)
             continue
         with immediate(conn):
-            conn.execute(
-                "INSERT INTO figi_lookup (isin, ticker, raw_ticker, name, exch_code, "
-                "mic_code, looked_up_at, attempts) VALUES (?, ?, ?, ?, ?, ?, ?, 1) "
-                "ON CONFLICT(isin) DO UPDATE SET ticker=excluded.ticker, "
-                "raw_ticker=excluded.raw_ticker, name=excluded.name, "
-                "exch_code=excluded.exch_code, mic_code=excluded.mic_code, "
-                "looked_up_at=excluded.looked_up_at, attempts=figi_lookup.attempts+1, "
-                "last_error=NULL",
-                (isin, res.ticker, res.raw_ticker, res.name, res.exch_code,
-                 res.mic_code, now),
-            )
-        if res.ticker:
-            s.resolved += 1
-        else:
-            s.negative += 1
+            conn.executemany(_FIGI_UPSERT, [
+                (r.isin, r.ticker, r.raw_ticker, r.name, r.exch_code, r.mic_code,
+                 now, r.error, FIGI_RESOLVER_VERSION)
+                for r in results
+            ])
+        for r in results:
+            if r.ticker:
+                s.resolved += 1
+            else:
+                s.negative += 1
         if progress:
             progress(done, s.asked, s)
     return s
@@ -161,6 +195,18 @@ SELECT issuer_name FROM transaction_norm
 _DISPLAY_NAME_FALLBACK = """
 SELECT issuer_name FROM transaction_norm
  WHERE lei = :lei ORDER BY transaction_date DESC LIMIT 1
+"""
+# The share OpenFIGI placed on a Swedish home venue, most traded lately. Ranking
+# by all-time count alone picks a pre-split ISIN: SAAB's old SE0000112385 has
+# 1,176 rows but maps to cross-listings only, the live SE0021921269 to 'SAABB'.
+_LISTED_ISIN = f"""
+SELECT n.isin FROM transaction_norm n
+  JOIN figi_lookup f ON f.isin = n.isin
+ WHERE n.lei = :lei AND f.ticker IS NOT NULL AND f.exch_code IN ({_HOME_EXCH_SQL})
+   AND COALESCE(n.instrument_type, '') IN ({_SHARE_TYPES_SQL})
+ GROUP BY n.isin
+ ORDER BY SUM(n.transaction_date >= date(:today, '-12 months')) DESC,
+          COUNT(*) DESC, MAX(n.transaction_date) DESC LIMIT 1
 """
 _PRIMARY_ISIN = """
 SELECT isin FROM transaction_norm
@@ -188,6 +234,10 @@ def build_companies(conn: sqlite3.Connection) -> CompanySummary:
     )]
     s = CompanySummary()
     now = config.now_local_iso()
+    # an all-provider override with a symbol; '' rows mean "has none"
+    manual = {r["lei"] for r in conn.execute(
+        "SELECT lei FROM ticker_override WHERE provider = '' AND symbol <> ''"
+    )}
 
     with immediate(conn):
         conn.execute("DELETE FROM company")
@@ -196,25 +246,31 @@ def build_companies(conn: sqlite3.Connection) -> CompanySummary:
             name = (conn.execute(_DISPLAY_NAME, {"lei": lei, "today": today}).fetchone()
                     or conn.execute(_DISPLAY_NAME_FALLBACK, {"lei": lei}).fetchone())
             display = name["issuer_name"] if name else lei
-            isin = (conn.execute(_PRIMARY_ISIN, {"lei": lei}).fetchone()
+            isin = (conn.execute(_LISTED_ISIN, {"lei": lei, "today": today}).fetchone()
+                    or conn.execute(_PRIMARY_ISIN, {"lei": lei}).fetchone()
                     or conn.execute(_ANY_ISIN, {"lei": lei}).fetchone())
             primary_isin = isin["isin"] if isin else None
 
             figi = None
             if primary_isin:
+                # home venue only: a v1 row may still hold a bond "ticker"
                 figi = conn.execute(
-                    "SELECT raw_ticker, mic_code, exch_code, ticker FROM figi_lookup "
-                    "WHERE isin = ? AND ticker IS NOT NULL", (primary_isin,),
+                    "SELECT raw_ticker, mic_code, exch_code, name FROM figi_lookup "
+                    f"WHERE isin = ? AND ticker IS NOT NULL AND exch_code IN ({_HOME_EXCH_SQL})",
+                    (primary_isin,),
                 ).fetchone()
+            source = "openfigi" if figi else ("manual" if lei in manual else None)
 
             conn.execute(
                 "INSERT INTO company (lei, display_name, primary_isin, raw_ticker, "
-                "mic_code, exch_code, ticker_source, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                "mic_code, exch_code, figi_name, ticker_source, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (lei, display, primary_isin,
                  figi["raw_ticker"] if figi else None,
                  figi["mic_code"] if figi else None,
                  figi["exch_code"] if figi else None,
-                 "openfigi" if figi else None, now),
+                 figi["name"] if figi else None,
+                 source, now),
             )
             s.companies += 1
             if figi:
@@ -234,6 +290,88 @@ def build_companies(conn: sqlite3.Connection) -> CompanySummary:
     return s
 
 
+# ── Yahoo symbols ──────────────────────────────────────────────────────────
+@dataclass
+class YahooSymbolSummary:
+    asked: int = 0
+    found: int = 0
+    missing: int = 0
+    transport_errors: int = 0
+    gave_up: bool = False   # stopped early on consecutive transport errors
+
+
+# (done, total, live summary) — fired after every ISIN.
+YahooSymbolProgress = Callable[[int, int, YahooSymbolSummary], None]
+
+# consecutive transport failures before the step stops: a rate-limited Yahoo
+# fails every request, and hammering it only extends the block
+_YAHOO_MAX_CONSECUTIVE_ERRORS = 5
+
+
+def _yahoo_isins_to_resolve(conn: sqlite3.Connection) -> list[str]:
+    exch = ", ".join(f"'{e}'" for e in yahoo_source.YAHOO_EXCH)
+    return [
+        r["primary_isin"] for r in conn.execute(
+            f"""
+            SELECT DISTINCT c.primary_isin FROM company c
+            LEFT JOIN yahoo_symbol y ON y.isin = c.primary_isin
+            WHERE c.raw_ticker IS NOT NULL AND c.exch_code IN ({exch})
+              AND (y.isin IS NULL
+                   OR (y.symbol IS NULL AND y.attempts < 5
+                       AND y.looked_up_at < date('now', '-90 days')))
+            ORDER BY c.primary_isin
+            """
+        )
+    ]
+
+
+def yahoo_symbols(
+    conn: sqlite3.Connection,
+    search: Callable[[str], str | None] | None = None,
+    *, progress: YahooSymbolProgress | None = None,
+) -> YahooSymbolSummary:
+    """Ask Yahoo for the symbol of every listed company's primary ISIN not yet
+    asked. Needs :func:`build_companies` first."""
+    search = search or yahoo_source.search_symbol
+    isins = _yahoo_isins_to_resolve(conn)
+    s = YahooSymbolSummary(asked=len(isins))
+    now = config.now_local_iso()
+    streak = 0
+    for done, isin in enumerate(isins, start=1):
+        try:
+            symbol = search(isin)
+        except Exception as exc:  # noqa: BLE001 — transport failure: do NOT cache
+            s.transport_errors += 1
+            conn.execute(
+                "UPDATE yahoo_symbol SET last_error = ?, attempts = attempts + 1 "
+                "WHERE isin = ?", (str(exc)[:200], isin),
+            )
+            streak += 1
+            if progress:
+                progress(done, s.asked, s)
+            if streak >= _YAHOO_MAX_CONSECUTIVE_ERRORS:
+                s.gave_up = True
+                log.warning("yahoo symbols: %d consecutive errors, stopping (%s)",
+                            streak, exc)
+                break
+            continue
+        streak = 0
+        conn.execute(
+            "INSERT INTO yahoo_symbol (isin, symbol, looked_up_at, attempts) "
+            "VALUES (?, ?, ?, 1) ON CONFLICT(isin) DO UPDATE SET "
+            "symbol=excluded.symbol, looked_up_at=excluded.looked_up_at, "
+            "attempts=yahoo_symbol.attempts+1, last_error=NULL",
+            (isin, symbol, now),
+        )
+        if symbol:
+            s.found += 1
+        else:
+            s.missing += 1
+        if progress:
+            progress(done, s.asked, s)
+    return s
+
+
 # ── market caps ────────────────────────────────────────────────────────────
 @dataclass
 class MarketCapSummary:
@@ -250,12 +388,18 @@ MarketCapProgress = Callable[[str, int, int], None]
 
 
 def _companies(conn: sqlite3.Connection) -> list[Company]:
+    overrides: dict[str, dict[str, str]] = {}
+    for r in conn.execute("SELECT lei, provider, symbol FROM ticker_override"):
+        overrides.setdefault(r["lei"], {})[r["provider"]] = r["symbol"] or ""
     return [
         Company(r["lei"], r["display_name"], r["primary_isin"], r["raw_ticker"],
-                r["mic_code"], r["exch_code"])
+                r["mic_code"], r["exch_code"], r["figi_name"],
+                symbols={"yahoo": r["yahoo_symbol"]} if r["yahoo_symbol"] else {},
+                overrides=overrides.get(r["lei"], {}))
         for r in conn.execute(
-            "SELECT lei, display_name, primary_isin, raw_ticker, mic_code, exch_code "
-            "FROM company"
+            "SELECT c.lei, c.display_name, c.primary_isin, c.raw_ticker, c.mic_code, "
+            "c.exch_code, c.figi_name, y.symbol AS yahoo_symbol FROM company c "
+            "LEFT JOIN yahoo_symbol y ON y.isin = c.primary_isin"
         )
     ]
 

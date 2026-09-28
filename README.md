@@ -32,7 +32,7 @@ FI marknadssok ──► ingest ──► raw_transaction   (append-only, source
 | --- | --- |
 | `ingest` | Fetches the FI export by publication-date window into `raw_transaction`. Rows FI stops returning are marked superseded, never deleted. |
 | `normalize` | Rebuilds `transaction_norm` from the live raw rows: parses dates, numbers and booleans. |
-| `refdata` | FX rates from the Riksbank, ISIN → ticker from OpenFIGI, market caps from Yahoo (with a manual CSV fallback). |
+| `refdata` | FX rates from the Riksbank, ISIN → ticker from OpenFIGI (Nasdaq Stockholm, First North, Spotlight or NGM listing), ISIN → Yahoo symbol from Yahoo's search, market caps from Yahoo (with a manual CSV fallback). |
 | `aggregate` | Classifies every row (counted, or excluded with a reason), then sums buys and sells per company for the `30d`, `90d`, `365d`, `ytd` and `all` windows. |
 | `export-static` | Writes the JSON the frontend reads. |
 
@@ -192,7 +192,7 @@ All optional.
 | `INSYN_USER_AGENT` | `Insynshandel/0.1 (…)` | User agent sent to FI. |
 | `INSYN_RIKSBANK_SPACING_S` | `25` | Delay between Riksbank requests. |
 | `INSYN_MARKETCAP_PROVIDERS` | `yahoo,manual` | Market-cap providers, tried in order. |
-| `OPENFIGI_API_KEY` | – | Raises the OpenFIGI rate limit (2.4 s → 0.3 s spacing). |
+| `OPENFIGI_API_KEY` | – | Raises the OpenFIGI rate limit (2.4 s → 0.3 s spacing, 10 → 100 ISINs per request). |
 
 Hand-maintained reference data (ticker overrides, the `Karaktär` map, manual
 market caps, issuer aliases) lives in [`data/seed/`](data/seed/README.md).

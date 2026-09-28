@@ -23,14 +23,28 @@ Columns: `lei,provider,symbol,note`.
     listed symbol" — loaded, stops anyone re-investigating.
 - `note` — free text.
 
+A loaded row is the **first** thing a market-cap provider consults. It wins over
+Yahoo's own ISIN search and over the fallback formatter. The symbol is in the
+provider's own form, for example `SBB-B.ST` for Yahoo. It is never written into
+`company.raw_ticker`, which stays OpenFIGI's verbatim ticker. A blank-provider row
+with a symbol sets `company.ticker_source = 'manual'`.
+
 ### Seeding note
 
-Seeded with 61 LEIs whose ISIN an earlier OpenFIGI XSTO lookup could not
-resolve, all marked `symbol = ?`.
-**"OpenFIGI failed" is not "this company has no symbol"** — most are real listed
-companies the lookup just missed. `db.load_seeds()` skips every `?` row.
+The worklist was regenerated on 2026-09-28, after the resolver-v2 re-lookup (all
+equity listings, with Nasdaq Stockholm, First North, Spotlight or NGM as the home
+venue). It is taken from the local DB, whose data ends on 2026-09-08. It lists
+every company that traded in the last 12 months and is still unresolved. All
+rows are `symbol = ?`, and each note gives the likely reason:
 
-Re-measure against the real backfill before hand-filling: after `insyn ingest
-backfill` + `insyn refdata figi`, the set of genuinely unresolvable LEIs may be
-much smaller than 61. Fill a real ticker in, or set `symbol` empty with a note
-if the company truly has none.
+- **75 rows with a blank provider**: no ticker at all. The causes are delisted
+  or renamed companies, foreign ISINs (a Stockholm SDB has its own ISIN), and
+  issuers with only bond ISINs.
+- **18 `yahoo` rows**: OpenFIGI has a ticker, but Yahoo's ISIN search returns no
+  `.ST` symbol, so the market cap falls back to the formatter's guess.
+
+The earlier seed held 61 rows from the v1 `micCode: XSTO` lookup. 54 of those now
+resolve automatically. **"OpenFIGI failed" is still not "this company has no
+symbol"**, so check each row before filling it in. Put in a real symbol, or leave
+`symbol` empty with a note when the company truly has none. `db.load_seeds()`
+skips every `?` row.

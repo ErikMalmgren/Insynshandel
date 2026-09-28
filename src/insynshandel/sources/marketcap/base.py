@@ -6,8 +6,8 @@ interface. A provider's `fetch()` **never raises**; partial success is normal.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from ... import config
@@ -23,6 +23,18 @@ class Company:
     raw_ticker: str | None       # OpenFIGI verbatim, e.g. 'INVE B'
     mic_code: str | None
     exch_code: str | None
+    figi_name: str | None = None  # OpenFIGI's name, e.g. 'SAAB AB-B'
+    # provider name -> symbol from a cached lookup (e.g. Yahoo's ISIN search)
+    symbols: Mapping[str, str] = field(default_factory=dict, hash=False)
+    # `ticker_override` rows: provider name ('' = every provider) -> symbol
+    overrides: Mapping[str, str] = field(default_factory=dict, hash=False)
+
+    def override_for(self, provider: str) -> str | None:
+        """A manual symbol for ``provider``: its own row, else an all-provider
+        row. ``''`` = checked, has no symbol. ``None`` = no override."""
+        if provider in self.overrides:
+            return self.overrides[provider]
+        return self.overrides.get("")
 
 
 @dataclass(frozen=True, slots=True)
