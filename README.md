@@ -172,7 +172,7 @@ All commands run as `uv run insyn …`.
 | `ingest recent [--days N]` | Incremental fetch of the last N publication days (default 7). |
 | `ingest gaps [--dry-run] [--max-days N]` | Find and re-fetch days that were never fetched. |
 | `normalize` | Rebuild `transaction_norm` from raw rows. |
-| `refdata {fx,figi,marketcaps}… [--backfill] [--limit N] [--quiet]` | Fetch reference data. `--backfill` fetches FX from 2016-07-01; `--limit` caps OpenFIGI lookups. |
+| `refdata {fx,figi,marketcaps}… [--backfill] [--limit N] [--quiet]` | Fetch reference data. FX is fetched only for currencies with a row newer than the stored rates (usually no call at all); `--backfill` force-refetches every currency from 2016-07-01; `--limit` caps OpenFIGI lookups. |
 | `aggregate` | Classify rows and rebuild the per-company aggregates. |
 | `build [--fx-backfill] [--figi-limit N] [--no-figi] [--no-marketcaps] [--quiet]` | `normalize` → `refdata` → `aggregate`. |
 | `export-static [--out DIR]` | Write the static JSON (default `dist/`). |

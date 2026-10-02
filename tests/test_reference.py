@@ -29,41 +29,147 @@ class FakeRiksbank:
         return self.series.get(currency, [])
 
 
+def _tx(conn, currency, transaction_date, raw_id=None):
+    """A bare transaction_norm row — only currency and date matter to FX demand."""
+    conn.execute("PRAGMA foreign_keys = OFF")    # no raw_transaction parent
+    conn.execute(
+        "INSERT INTO transaction_norm (raw_id, transaction_date, currency) VALUES (?, ?, ?)",
+        (raw_id, transaction_date, currency),
+    )
+
+
+def _rates(conn, currency, *days):
+    conn.executemany(
+        "INSERT INTO fx_rate (currency, rate_date, sek_per_unit) VALUES (?, ?, 10.0)",
+        [(currency, d.isoformat()) for d in days],
+    )
+
+
+def _ago(n: int) -> date:
+    return reference.config.today() - timedelta(days=n)
+
+
+def test_fx_nothing_past_the_watermark_makes_no_call(db_conn):
+    _rates(db_conn, "USD", _ago(3))
+    _tx(db_conn, "USD", _ago(3).isoformat())
+    _tx(db_conn, "USD", _ago(400).isoformat())   # old rows are already covered
+    _tx(db_conn, "SEK", _ago(0).isoformat())     # SEK never needs a rate
+    fake = FakeRiksbank({})
+    s = reference.fx(db_conn, fake)
+    assert fake.calls == []
+    assert s.ok and s.currencies == {}
+    assert s.up_to_date == len(reference.config.FX_CURRENCIES)
+
+
+def test_fx_fetches_only_the_currency_past_its_watermark(db_conn):
+    _rates(db_conn, "USD", _ago(5))
+    _rates(db_conn, "EUR", _ago(5))
+    _tx(db_conn, "USD", _ago(1).isoformat())
+    _tx(db_conn, "EUR", _ago(5).isoformat())
+    fake = FakeRiksbank({"USD": [(_ago(1).isoformat(), 9.5)]})
+    s = reference.fx(db_conn, fake)
+    assert fake.calls == [("USD", _ago(4), reference.config.today())]
+    assert s.currencies == {"USD": 1}
+    # the new rate moved the watermark: the next run is a no-op
+    fake.calls.clear()
+    reference.fx(db_conn, fake)
+    assert fake.calls == []
+
+
+def test_fx_currency_without_rates_starts_at_register_epoch(db_conn):
+    _tx(db_conn, "CHF", "2019-03-04")
+    fake = FakeRiksbank({})
+    reference.fx(db_conn, fake)
+    assert fake.calls == [("CHF", date(2016, 7, 1), reference.config.today())]
+
+
+def test_fx_unclassified_currency_is_never_fetched(db_conn):
+    _tx(db_conn, "XYZ", _ago(1).isoformat())     # stays loud in doctor instead
+    _tx(db_conn, "SCR", _ago(1).isoformat())     # FX_NO_SERIES
+    fake = FakeRiksbank({})
+    reference.fx(db_conn, fake)
+    assert fake.calls == []
+
+
+def test_fx_future_dated_row_is_clamped_to_today(db_conn):
+    today = reference.config.today()
+    _rates(db_conn, "NOK", _ago(2))
+    _tx(db_conn, "NOK", (today + timedelta(days=3000)).isoformat())
+    fake = FakeRiksbank({"NOK": [(today.isoformat(), 0.95)]})
+    reference.fx(db_conn, fake)
+    assert fake.calls == [("NOK", _ago(1), today)]
+    # rates through today satisfy it — the typo does not refetch forever
+    fake.calls.clear()
+    reference.fx(db_conn, fake)
+    assert fake.calls == []
+
+
+def test_fx_malformed_transaction_date_does_not_crash(db_conn):
+    _rates(db_conn, "DKK", _ago(2))
+    _tx(db_conn, "DKK", "garbage")               # FI text, never validated
+    reference.fx(db_conn, FakeRiksbank({}))      # must not raise
+
+
+def _mcap(conn, currency):
+    conn.execute(
+        "INSERT INTO market_cap (lei, as_of, market_cap, currency, market_cap_sek, source) "
+        "VALUES ('L', ?, 1e9, ?, 1.1e10, 'test')",
+        (reference.config.today().isoformat(), currency),
+    )
+
+
+def test_fx_marketcap_currency_refreshed_once_a_week(db_conn):
+    age = reference.FX_MARKETCAP_MAX_AGE_DAYS
+    _mcap(db_conn, "EUR")
+    _rates(db_conn, "EUR", _ago(age - 1))
+    fake = FakeRiksbank({})
+    reference.fx(db_conn, fake)
+    assert fake.calls == []
+
+    db_conn.execute("DELETE FROM fx_rate")
+    _rates(db_conn, "EUR", _ago(age + 1))
+    reference.fx(db_conn, fake)
+    assert fake.calls == [("EUR", _ago(age), reference.config.today())]
+
+
 def test_fx_upserts_and_is_idempotent(db_conn):
     fake = FakeRiksbank({
         "USD": [("2026-09-01", 9.5), ("2026-09-02", 9.6)],
         "EUR": [("2026-09-01", 11.1)],
         "GBP": [], "CAD": [],
     })
-    s1 = reference.fx(db_conn, fake, days=7)
+    s1 = reference.fx(db_conn, fake, backfill=True)
     assert s1.ok
     assert s1.currencies["USD"] == 2
     n1 = db_conn.execute("SELECT COUNT(*) FROM fx_rate").fetchone()[0]
-    reference.fx(db_conn, fake, days=7)
+    reference.fx(db_conn, fake, backfill=True)
     n2 = db_conn.execute("SELECT COUNT(*) FROM fx_rate").fetchone()[0]
     assert n1 == n2 == 3
 
 
-def test_fx_backfill_starts_at_register_epoch(db_conn):
+def test_fx_backfill_fetches_every_currency_from_register_epoch(db_conn):
+    _rates(db_conn, "USD", _ago(0))              # current, but backfill ignores that
     fake = FakeRiksbank({})
     reference.fx(db_conn, fake, backfill=True)
+    assert [c for c, _, _ in fake.calls] == list(reference.config.FX_CURRENCIES)
     assert all(call[1] == date(2016, 7, 1) for call in fake.calls)
 
 
 def test_fx_progress_brackets_every_currency_fetch(db_conn):
-    from insynshandel import config
-
-    fake = FakeRiksbank({"USD": [("2026-09-01", 9.5)]})
+    _rates(db_conn, "USD", _ago(9))
+    _rates(db_conn, "EUR", _ago(9))
+    _tx(db_conn, "USD", _ago(1).isoformat())
+    _tx(db_conn, "EUR", _ago(1).isoformat())
+    fake = FakeRiksbank({"USD": [(_ago(1).isoformat(), 9.5)]})
     seen: list[tuple[int, int, str]] = []
-    reference.fx(db_conn, fake, days=7,
+    reference.fx(db_conn, fake,
                  progress=lambda d, t, detail: seen.append((d, t, detail)))
 
-    n = len(config.FX_CURRENCIES)
-    assert len(seen) == 2 * n                       # a tick before and after each
-    window = f"{config.today() - timedelta(days=7)}..{config.today()}"
-    assert seen[0] == (0, n, f"fetching {config.FX_CURRENCIES[0]} {window}")
-    assert seen[1] == (1, n, "USD 1 rows")
-    assert seen[-1][:2] == (n, n)                   # ends on total, so the meter closes
+    window = f"{_ago(8)}..{reference.config.today()}"
+    assert len(seen) == 4                           # a tick before and after each
+    assert seen[0] == (0, 2, f"fetching USD {window}")
+    assert seen[1] == (1, 2, "USD 1 rows")
+    assert seen[-1][:2] == (2, 2)                   # ends on total, so the meter closes
 
 
 def test_fx_progress_reports_a_failed_currency(db_conn):
@@ -74,7 +180,7 @@ def test_fx_progress_reports_a_failed_currency(db_conn):
             raise RiksbankError("429")
 
     seen: list[tuple[int, int, str]] = []
-    s = reference.fx(db_conn, Boom(),
+    s = reference.fx(db_conn, Boom(), backfill=True,
                      progress=lambda d, t, detail: seen.append((d, t, detail)))
     assert not s.ok
     # a currency that raised still advances the counter — a stalled meter reads
@@ -90,9 +196,29 @@ def test_fx_error_is_recorded_not_raised(db_conn):
         def observations(self, *a):
             raise RiksbankError("429")
 
-    s = reference.fx(db_conn, Boom())
+    s = reference.fx(db_conn, Boom(), backfill=True)
     assert not s.ok
     assert len(s.errors) == len(reference.config.FX_CURRENCIES)
+
+
+def test_riksbank_204_is_an_empty_range_not_an_error():
+    from insynshandel.sources import riksbank
+
+    class Resp:
+        status_code = 204
+
+        def json(self):
+            raise AssertionError("a 204 has no body")
+
+    class Session:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, *a, **kw):
+            return Resp()
+
+    client = riksbank.RiksbankClient(session=Session(), spacing_s=0)
+    assert client.observations("USD", date(2026, 9, 26), date(2026, 9, 27)) == []
 
 
 # ── OpenFIGI ──────────────────────────────────────────────────────────────

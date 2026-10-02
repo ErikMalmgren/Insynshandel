@@ -26,10 +26,23 @@ log = logging.getLogger(__name__)
 
 
 # ── FX ─────────────────────────────────────────────────────────────────────
+# Fetched on demand, never on a timer. `fx_rate` is contiguous per currency up
+# to its newest `rate_date` (the watermark), so any row dated on or before it
+# already forward-fills to the right rate. A currency is fetched only when a
+# row has moved past its watermark, and then only watermark+1..today. Most
+# builds make zero SWEA calls (the spacing between calls is 25 s).
+#
+# A non-SEK market cap is valued at *today's* rate, so its currency is also
+# refreshed once the watermark is more than this many days old — it only feeds
+# the outlier check, a week of drift is irrelevant there.
+FX_MARKETCAP_MAX_AGE_DAYS = 7
+
+
 @dataclass
 class FxSummary:
     currencies: dict[str, int] = field(default_factory=dict)   # ccy -> rows upserted
     errors: list[str] = field(default_factory=list)
+    up_to_date: int = 0                 # currencies that needed no call
 
     @property
     def ok(self) -> bool:
@@ -42,23 +55,60 @@ class FxSummary:
 FxProgress = Callable[[int, int, str], None]
 
 
+def _fx_needed(conn: sqlite3.Connection) -> dict[str, date]:
+    """Currency -> first date to fetch, for every currency that needs a call.
+
+    Only `config.FX_CURRENCIES` — an unclassified currency is not fetched here,
+    it stays loud as `no_fx_rate` in `doctor`.
+    """
+    # ISO strings compared as strings, like FxTable: transaction_date is FI's
+    # text unvalidated, and a malformed one must not crash the hourly build.
+    today = config.today()
+    watermark = dict(conn.execute(
+        "SELECT currency, MAX(rate_date) FROM fx_rate GROUP BY currency").fetchall())
+    # clamped to today: a future-dated typo must not refetch on every run
+    latest_tx = {
+        ccy: min(d, today.isoformat())
+        for ccy, d in conn.execute(
+            "SELECT currency, MAX(transaction_date) FROM transaction_norm "
+            "WHERE currency <> 'SEK' AND transaction_date IS NOT NULL "
+            "GROUP BY currency")
+    }
+    mcap_ccys = {r["currency"] for r in conn.execute(
+        "SELECT DISTINCT currency FROM market_cap_current WHERE currency <> 'SEK'")}
+    stale_before = (today - timedelta(days=FX_MARKETCAP_MAX_AGE_DAYS)).isoformat()
+
+    need: dict[str, date] = {}
+    for ccy in config.FX_CURRENCIES:
+        wm = watermark.get(ccy)
+        tx = latest_tx.get(ccy)
+        if wm is None:
+            if tx is not None or ccy in mcap_ccys:
+                need[ccy] = date.fromisoformat(config.FI_EARLIEST)
+        elif (tx is not None and tx > wm) or (ccy in mcap_ccys and wm < stale_before):
+            need[ccy] = date.fromisoformat(wm) + timedelta(days=1)
+    return need
+
+
 def fx(
     conn: sqlite3.Connection,
     client: riksbank.RiksbankClient | None = None,
     *,
     backfill: bool = False,
-    days: int = 10,
     progress: FxProgress | None = None,
 ) -> FxSummary:
-    client = client or riksbank.RiksbankClient()
-    start = (
-        date.fromisoformat(config.FI_EARLIEST) if backfill
-        else config.today() - timedelta(days=days)
-    )
+    """Fetch the SWEA rates that rows actually need; ``backfill`` refetches all."""
     end = config.today()
-    s = FxSummary()
-    total = len(config.FX_CURRENCIES)
-    for done, ccy in enumerate(config.FX_CURRENCIES, start=1):
+    if backfill:
+        start_at = dict.fromkeys(config.FX_CURRENCIES, date.fromisoformat(config.FI_EARLIEST))
+    else:
+        start_at = _fx_needed(conn)
+    s = FxSummary(up_to_date=len(config.FX_CURRENCIES) - len(start_at))
+    if not start_at:
+        return s
+    client = client or riksbank.RiksbankClient()
+    total = len(start_at)
+    for done, (ccy, start) in enumerate(start_at.items(), start=1):
         if progress:
             progress(done - 1, total, f"fetching {ccy} {start}..{end}")
         try:

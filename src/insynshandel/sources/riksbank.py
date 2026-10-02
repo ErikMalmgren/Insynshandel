@@ -1,8 +1,10 @@
 """Riksbank SWEA — daily SEK exchange rates.
 
-Free, no key. One call per currency covers the whole register (a decade-wide
-range returns ~100 KB). Gaps on weekends and Swedish holidays are stored as-is;
-forward-fill happens at read time in :mod:`insynshandel.pipeline.aggregate`.
+Free, no key. One call per currency and range; a decade-wide backfill range
+returns ~100 KB. Day to day, :func:`insynshandel.pipeline.reference.fx` asks
+only for the currencies whose rows have moved past the stored rates, usually
+none. Gaps on weekends and Swedish holidays are stored as-is; forward-fill
+happens at read time in :mod:`insynshandel.pipeline.fx`.
 """
 
 from __future__ import annotations
@@ -29,8 +31,8 @@ SERIES: dict[str, str] = {
     "RUB": "SEKRUBPMI",
 }
 
-# ~3 requests/minute before a 429. Only matters if a range is rejected
-# and we chunk by year — a whole-range fetch is 4 calls total.
+# ~3 requests/minute before a 429. Only paid between calls in one run — a
+# backfill (one call per currency) or the rare build that needs several.
 RIKSBANK_SPACING_S = float(os.environ.get("INSYN_RIKSBANK_SPACING_S", "25"))
 
 
@@ -74,6 +76,10 @@ class RiksbankClient:
                     raise RiksbankError(f"{currency}: rate-limited after retries")
                 time.sleep(30)
                 continue
+            if resp.status_code == 204:
+                # a range with no business day yet (weekend, before ~16:15
+                # publication, or a discontinued series such as RUB)
+                return []
             if resp.status_code != 200:
                 raise RiksbankError(f"{currency}: HTTP {resp.status_code}")
             data = resp.json()

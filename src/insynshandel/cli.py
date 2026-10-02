@@ -99,6 +99,14 @@ def _print_yahoo(ys: reference.YahooSymbolSummary, prefix: str) -> None:
           + (" (stopped early, rest next run)" if ys.gave_up else ""))
 
 
+def _fx_line(fs: reference.FxSummary) -> str:
+    """One summary line for ``reference.fx``: what was fetched, what was current."""
+    if not fs.currencies and not fs.errors:
+        return f"up to date (0 calls, {fs.up_to_date} currencies current)"
+    line = f"{fs.currencies} ({fs.up_to_date} already current)"
+    return line + (f" errors={fs.errors}" if fs.errors else "")
+
+
 def _fx_progress(quiet: bool):
     """``reference.fx``'s (done, total, detail) is already _Progress's signature."""
     return None if quiet else _Progress("fx")
@@ -295,7 +303,7 @@ def _cmd_refdata(args: argparse.Namespace) -> int:
         if step == "fx":
             fs = reference.fx(conn, backfill=args.backfill,
                               progress=_fx_progress(args.quiet))
-            print(f"refdata fx: {fs.currencies}" + (f" errors={fs.errors}" if fs.errors else ""))
+            print(f"refdata fx: {_fx_line(fs)}")
             rc |= 0 if fs.ok else 1
         elif step == "figi":
             gs = reference.figi(conn, limit=args.limit,
@@ -331,7 +339,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     print("build: refdata")
     fs = reference.fx(conn, backfill=args.fx_backfill,
                       progress=_fx_progress(args.quiet))
-    print(f"  fx {fs.currencies}")
+    print(f"  fx {_fx_line(fs)}")
     if args.no_figi:
         print("  figi skipped (--no-figi)")
     else:
@@ -404,7 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     rd = sub.add_parser("refdata", help="reference data: fx / figi / marketcaps")
     rd.add_argument("steps", nargs="+", choices=["fx", "figi", "marketcaps"])
-    rd.add_argument("--backfill", action="store_true", help="fx: fetch from 2016-07-01")
+    rd.add_argument("--backfill", action="store_true",
+                    help="fx: refetch every currency from 2016-07-01, needed or not")
     rd.add_argument("--limit", type=int, default=None, help="figi: cap ISINs this run")
     rd.add_argument("--quiet", action="store_true",
                     help="fx/figi/marketcaps: no progress meter, only the summary")
