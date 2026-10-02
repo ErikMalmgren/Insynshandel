@@ -105,10 +105,11 @@ uv sync
 ```
 
 **Fast path: download the current database.** The ingest workflow publishes
-the database as the rolling `db-latest` release asset:
+the database as the rolling `db-latest` release asset, compressed with zstd:
 
 ```bash
-gh release download db-latest --pattern insynshandel.db --dir data --clobber
+gh release download db-latest --pattern insynshandel.db.zst --dir data --clobber
+zstd -d -f --rm data/insynshandel.db.zst -o data/insynshandel.db
 ```
 
 **Slow path: build it from scratch.**
@@ -205,11 +206,14 @@ GitHub Pages.
 - [`ci.yml`](.github/workflows/ci.yml) runs on every push and PR, with no
   network access: `ruff`, `pytest`, and `doctor` against a freshly migrated
   empty database.
-- [`ingest.yml`](.github/workflows/ingest.yml) runs hourly 06:00–20:00 CET on
-  weekdays (`ingest recent --days 7`) and nightly (`ingest gaps` plus a 90-day
-  re-scan). Each run restores the database from the `db-latest` release, then
-  runs `build`, `export-static` and `doctor`. It then re-uploads the database
-  and deploys the site to Pages. A failing `doctor` stops the deploy.
+- [`ingest.yml`](.github/workflows/ingest.yml) runs every 15 minutes
+  06:00–20:00 CET on weekdays (`ingest recent --days 7`) and nightly
+  (`ingest gaps` plus a 90-day re-scan). Each run restores the database from
+  the `db-latest` release, then runs `build`, `export-static` and `doctor`. It
+  then re-uploads the database and deploys the site to Pages. A failing
+  `doctor` stops the deploy. A daytime run whose fetch found no new or revised
+  rows stops after the fetch. Nightly runs, manual runs and pushes to `main`
+  that touch `frontend/`, `src/` or `data/seed/` always publish.
 
 To set it up on a fork, set **Settings → Pages → Source** to *GitHub Actions*
 and configure the custom domain there. Add `OPENFIGI_API_KEY` as a repository
@@ -217,7 +221,8 @@ secret if you have one. Seed the database by backfilling locally and
 uploading the result:
 
 ```bash
-gh release create db-latest data/insynshandel.db \
+zstd -3 -T0 -f data/insynshandel.db -o data/insynshandel.db.zst
+gh release create db-latest data/insynshandel.db.zst \
   --title "Latest database snapshot" --notes "Rolling. Updated by the ingest workflow."
 ```
 

@@ -184,11 +184,16 @@ def company_index(conn: sqlite3.Connection) -> schemas.CompanyIndex:
 
 
 # ── company/{lei}.json ─────────────────────────────────────────────────────
-# rows for a company, following any issuer_alias merge
+# rows for a company, following any issuer_alias merge: its aliases' LEIs, plus
+# its own unless it is itself an alias. Same rows as
+# `COALESCE(<canonical of lei>, lei) = :lei`, but as `lei IN (...)` it can use
+# ix_norm_lei_txdate — the COALESCE form scanned the whole table per company,
+# which was ~99% of export-static's (and so doctor's) runtime.
 _TX_FROM = (
-    "FROM transaction_norm WHERE COALESCE("
-    "(SELECT canonical_lei FROM issuer_alias WHERE alias_lei = transaction_norm.lei), "
-    "transaction_norm.lei) = ?"
+    "FROM transaction_norm WHERE lei IN ("
+    "SELECT alias_lei FROM issuer_alias WHERE canonical_lei = :lei "
+    "UNION ALL "
+    "SELECT :lei WHERE NOT EXISTS (SELECT 1 FROM issuer_alias WHERE alias_lei = :lei))"
 )
 _TX_COLS = (
     "transaction_date, published_date, pdmr, position, nature, sign, is_counted, "
@@ -240,11 +245,13 @@ def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail 
             "SELECT * FROM agg_company_period WHERE lei = ? ORDER BY period", (lei,)
         )
     ]
-    total = conn.execute(f"SELECT COUNT(*) c {_TX_FROM}", (lei,)).fetchone()["c"]
+    total = conn.execute(f"SELECT COUNT(*) c {_TX_FROM}", {"lei": lei}).fetchone()["c"]
+    # a total order: a tie on the dates alone left the LIMIT cutoff to the query
+    # plan, so the same DB could export different rows
     recent = conn.execute(
         f"SELECT {_TX_COLS} {_TX_FROM} "
-        "ORDER BY transaction_date DESC, published_date DESC LIMIT ?",
-        (lei, config.COMPANY_TX_LIMIT),
+        "ORDER BY transaction_date DESC, published_at DESC, raw_id DESC LIMIT :limit",
+        {"lei": lei, "limit": config.COMPANY_TX_LIMIT},
     ).fetchall()
 
     return schemas.CompanyDetail(

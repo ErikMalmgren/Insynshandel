@@ -1,4 +1,5 @@
-"""CLI-only helpers: the progress meter the long refdata steps print."""
+"""CLI-only helpers: the progress meter the long refdata steps print, and the
+workflow-step output ingest.yml reads."""
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ import io
 from insynshandel.cli import (
     _figi_progress,
     _fx_progress,
+    _github_output,
     _marketcap_progress,
     _Progress,
 )
@@ -64,3 +66,15 @@ def test_fx_progress_is_the_meter_itself(capsys):
     cb = _fx_progress(quiet=False)
     cb(1, 8, "USD 2510 rows")
     assert "fx 1/8 (12%) USD 2510 rows" in capsys.readouterr().err
+
+
+def test_github_output_appends_only_inside_a_workflow(tmp_path, monkeypatch):
+    out = tmp_path / "gh_output"
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    _github_output("changed", "true")               # local run: no-op, no crash
+    assert not out.exists()
+
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    out.write_text("earlier=1\n")
+    _github_output("changed", "false")
+    assert out.read_text() == "earlier=1\nchanged=false\n"

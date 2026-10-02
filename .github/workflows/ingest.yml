@@ -5,6 +5,11 @@
 #   build → export → doctor → re-upload the DB → assemble `site/`.
 #   Job `deploy`: publish `site/` to this repo's Pages (insyn.malmgren.dev).
 #
+#   A scheduled daytime tick whose fetch changed nothing stops after the fetch:
+#   no build, no re-upload, no deploy. Nightly, manual and push runs always
+#   publish — the aggregate windows slide with the date, and a code or seed
+#   change alters the output without any new data.
+#
 #   Needs Settings → Pages → Source: "GitHub Actions". The custom domain is
 #   set there too (an Actions deploy ignores a CNAME file).
 #   Optional secret: `OPENFIGI_API_KEY`.
@@ -13,10 +18,20 @@ name: ingest
 
 on:
   workflow_dispatch: {}          # manual run — also how you seed `db-latest`
+  push:                          # publish code / seed changes without waiting
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "src/**"
+      - "data/seed/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ingest.yml"
   schedule:
     # GitHub cron is UTC; CET is UTC+1 (UTC+2 under DST), so these drift ±1h
     # across the year — that is fine, the windows have an hour of slack.
-    - cron: "0 5-19 * * 1-5"     # ~06:00–20:00 CET, Mon–Fri — hourly poll
+    # Off the hour on purpose: GitHub delays (and drops) :00 runs under load.
+    - cron: "7-59/15 5-19 * * 1-5"   # ~06:00–20:00 CET, Mon–Fri — 15-min poll
     - cron: "0 2 * * *"          # ~03:00 CET, nightly — gaps + 90-day re-scan
 
 # Never let two runs write the database at once.
@@ -31,12 +46,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write            # gh release upload/download on this repo
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
     env:
       GH_TOKEN: ${{ github.token }}
       OPENFIGI_API_KEY: ${{ secrets.OPENFIGI_API_KEY }}
       # nightly cron => deep re-scan; everything else => cheap incremental
       RECENT_DAYS: ${{ github.event.schedule == '0 2 * * *' && '90' || '7' }}
       IS_NIGHTLY: ${{ github.event.schedule == '0 2 * * *' }}
+      # publish even when the fetch changed nothing: nightly, manual, push
+      FULL_RUN: ${{ github.event_name != 'schedule' || github.event.schedule == '0 2 * * *' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,16 +65,20 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --no-dev
 
-      # 1. Restore the DB from the rolling release. First run: no asset yet →
-      #    start from a fresh migration. (`gh release download` exits non-zero
-      #    when the tag or asset is missing.) Migrate either way: a restored DB
-      #    predates any migration added since it was uploaded, and `migrate`
-      #    only applies the ones it lacks.
+      # 1. Restore the DB from the rolling release — zstd-compressed (~4x
+      #    smaller), else the raw .db an older run uploaded. First run: no
+      #    asset yet → start from a fresh migration. (`gh release download`
+      #    exits non-zero when the tag or asset is missing.) Migrate either way:
+      #    a restored DB predates any migration added since it was uploaded,
+      #    and `migrate` only applies the ones it lacks.
       - name: Restore insynshandel.db
         run: |
           mkdir -p data
-          if gh release download db-latest --pattern 'insynshandel.db' --dir data --clobber; then
-            echo "restored $(du -h data/insynshandel.db | cut -f1) from db-latest"
+          if gh release download db-latest --pattern 'insynshandel.db.zst' --dir data --clobber; then
+            zstd -d -f --rm data/insynshandel.db.zst -o data/insynshandel.db
+            echo "restored $(du -h data/insynshandel.db | cut -f1) from db-latest (zstd)"
+          elif gh release download db-latest --pattern 'insynshandel.db' --dir data --clobber; then
+            echo "restored $(du -h data/insynshandel.db | cut -f1) from db-latest (raw)"
           else
             echo "no db-latest asset — migrating a fresh database"
           fi
@@ -66,51 +89,78 @@ jobs:
         if: env.IS_NIGHTLY == 'true'
         run: uv run insyn ingest gaps
 
-      # 3. Incremental fetch. --days 7 hourly so a short outage self-heals;
-      #    --days 90 on the nightly run. Writes nothing when nothing changed.
+      # 3. Incremental fetch. --days 7 by default so a short outage self-heals;
+      #    --days 90 on the nightly run. Writes nothing when nothing changed,
+      #    and says so in the step output `changed`.
       - name: Ingest recent
+        id: ingest
         run: uv run insyn ingest recent --days "$RECENT_DAYS"
+
+      # Everything below is gated on this. A quiet tick's only DB writes are
+      # fetch bookkeeping, and the next tick re-fetches the same days anyway,
+      # so dropping them by not re-uploading loses nothing.
+      - name: Decide whether to publish
+        id: decide
+        env:
+          CHANGED: ${{ steps.ingest.outputs.changed }}
+        run: |
+          if [ "$FULL_RUN" = "true" ] || [ "$CHANGED" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "no new or revised rows — skipping build, persist and deploy"
+          fi
 
       # 4. Rebuild — normalize → refdata → aggregate, in that order.
       #    FIGI/market-caps run here; --no-marketcaps if yfinance is too flaky
       #    in CI (the site then serves `verification: "unverifiable"`).
       - name: Build
+        if: steps.decide.outputs.publish == 'true'
         run: uv run insyn build
 
       # 5. Export the static JSON.
       - name: Export static
+        if: steps.decide.outputs.publish == 'true'
         run: uv run insyn export-static --out dist/
 
       # Deliberately fatal: a failed check should stop the publish, not ship
       # bad JSON. Soft issues like a degraded market-cap provider SKIP rather
       # than fail.
       - name: Acceptance checks
+        if: steps.decide.outputs.publish == 'true'
         run: uv run insyn doctor
 
-      # 6a. Re-upload the DB as the rolling release asset. It is ~100–150 MB
-      #     after backfill — over GitHub's 100 MB git limit, fine as an asset.
+      # 6a. Re-upload the DB as the rolling release asset, zstd-compressed:
+      #     ~160 MB raw, ~40 MB compressed — every run downloads it, quiet
+      #     ticks included.
       - name: Persist insynshandel.db
+        if: steps.decide.outputs.publish == 'true'
         run: |
+          zstd -3 -T0 -f data/insynshandel.db -o data/insynshandel.db.zst
           gh release view db-latest >/dev/null 2>&1 \
             || gh release create db-latest --title "Latest database snapshot" --notes "Rolling. Updated by the ingest workflow."
-          gh release upload db-latest data/insynshandel.db --clobber
+          gh release upload db-latest data/insynshandel.db.zst --clobber
 
       # 6b. Assemble the site: frontend at the root, JSON under data/
       #     (`API_BASE = './data'`). Never export into frontend/ or copy the
       #     frontend into dist/ — export_static rmtree's its --out directory.
       - name: Assemble site
+        if: steps.decide.outputs.publish == 'true'
         run: |
           mkdir -p site/data
           cp -r frontend/. site/
           cp -r dist/.     site/data/
 
       - uses: actions/upload-pages-artifact@v4
+        if: steps.decide.outputs.publish == 'true'
         with:
           path: site/
 
-  # 7. Publish. Runs only when every ingest step passed — doctor included.
+  # 7. Publish. Runs only when every ingest step passed — doctor included —
+  #    and the run had something to publish (no Pages artifact otherwise).
   deploy:
     needs: ingest
+    if: needs.ingest.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

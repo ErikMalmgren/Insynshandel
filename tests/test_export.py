@@ -116,6 +116,28 @@ def test_company_detail_caps_transactions_but_reports_total(built, monkeypatch):
     assert d.tx_count_total >= len(d.recent_transactions)
 
 
+def test_company_detail_follows_issuer_alias(built):
+    # the two busiest LEIs: fold `alias` into `canon`
+    alias, canon = [r[0] for r in built.execute(
+        "SELECT n.lei FROM transaction_norm n JOIN company c ON c.lei = n.lei "
+        "GROUP BY n.lei ORDER BY COUNT(*) DESC, n.lei LIMIT 2"
+    )]
+    n = dict(built.execute(
+        "SELECT lei, COUNT(*) FROM transaction_norm WHERE lei IN (?, ?) GROUP BY lei",
+        (alias, canon),
+    ).fetchall())
+    built.execute("INSERT INTO issuer_alias VALUES (?, ?, 'test')", (alias, canon))
+
+    merged = reads.company_detail(built, canon)
+    assert merged.tx_count_total == n[alias] + n[canon]
+    assert len(merged.recent_transactions) == min(n[alias] + n[canon],
+                                                  config.COMPANY_TX_LIMIT)
+    # the alias keeps its company row but owns no transactions any more
+    folded = reads.company_detail(built, alias)
+    assert folded.tx_count_total == 0
+    assert folded.recent_transactions == []
+
+
 def test_company_detail_unknown_lei_is_none(built):
     assert reads.company_detail(built, "NOSUCHLEI0000000000") is None
 

@@ -8,6 +8,7 @@ Implemented: ``db migrate``, ``ingest {backfill,recent,gaps}``, ``normalize``,
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import date
@@ -146,6 +147,16 @@ def _print_summary(s: ingest.IngestSummary) -> None:
         print(f"  .. request budget ({config.MAX_REQUESTS_PER_RUN}) hit — re-run to continue")
 
 
+def _github_output(key: str, value: str) -> None:
+    """Append ``key=value`` to ``$GITHUB_OUTPUT`` when running as a workflow
+    step; a no-op anywhere else. ingest.yml reads ``changed`` to skip build →
+    deploy on a quiet tick."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{key}={value}\n")
+
+
 def _cmd_db(args: argparse.Namespace) -> int:
     if args.db_command != "migrate":
         print("usage: insyn db migrate", file=sys.stderr)
@@ -181,6 +192,8 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     if args.ingest_command == "recent":
         s = ingest.recent(conn, client, days=args.days)
         _print_summary(s)
+        changed = s.rows_inserted + s.rows_superseded > 0
+        _github_output("changed", "true" if changed else "false")
         return 0 if s.ok else 1
 
     if args.ingest_command == "gaps":
