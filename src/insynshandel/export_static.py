@@ -7,6 +7,8 @@ serializing its Pydantic model (:mod:`insynshandel.schemas`).
     dist/leaderboard-{30d,90d,365d,all}.json     (complete, UNSORTED)
     dist/companies.json                          (lei, name, ticker — no pdmr)
     dist/company/{lei}.json                      (detail + recent tx, capped)
+    dist/company-tx/{lei}.json                   (full tx history, compact —
+                                                  fetched only on demand)
     dist/data-quality.json
 """
 
@@ -33,8 +35,8 @@ class ExportSummary:
     warnings: list[str] = field(default_factory=list)
 
 
-def _write(path: Path, model, summary: ExportSummary) -> None:
-    payload = json.dumps(model.model_dump(), ensure_ascii=False, indent=2,
+def _write(path: Path, model, summary: ExportSummary, indent: int | None = 2) -> None:
+    payload = json.dumps(model.model_dump(), ensure_ascii=False, indent=indent,
                          sort_keys=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(payload + "\n", encoding="utf-8")
@@ -67,14 +69,19 @@ def export(conn: sqlite3.Connection, out_dir: Path | str) -> ExportSummary:
 
     _write(out / "companies.json", reads.company_index(conn), s)
 
+    windows = reads.period_windows(conn)
     for row in conn.execute("SELECT lei FROM company ORDER BY lei"):
         lei = row["lei"]
         if not _LEI_RE.match(lei):
             s.warnings.append(f"skipped company with odd lei {lei!r}")
             continue
-        detail = reads.company_detail(conn, lei)
+        detail = reads.company_detail(conn, lei, windows)
         if detail is not None:
             _write(out / "company" / f"{lei}.json", detail, s)
+            # unindented: the full history is most of dist/, and nobody reads
+            # it by eye
+            _write(out / "company-tx" / f"{lei}.json",
+                   reads.company_transactions(conn, lei), s, indent=None)
             s.companies += 1
 
     return s

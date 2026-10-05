@@ -8,15 +8,15 @@
 <meta name="description" content="What this dataset is, how far back it goes, which transactions are counted, how they are converted to SEK, and which rows are implausible enough to report.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
 <link rel="canonical" href="https://insyn.malmgren.dev/about.html">
-<link rel="stylesheet" href="/css/insyn.css?v=2">
-<script type="module" src="/js/about.js?v=2"></script>
+<link rel="stylesheet" href="/css/insyn.css?v=3">
+<script type="module" src="/js/about.js?v=3"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <div class="wrap-wide">
 <main id="main">
 
-<h1 class="cmd"><span class="prompt" aria-hidden="true">erik@insyn:~$</span> man insyn</h1>
+<h1 class="page-title">about</h1>
 
 <p class="lede prose">Every transaction here is a report a person discharging managerial
 responsibilities filed with <strong>Finansinspektionen</strong>, the Swedish financial
@@ -98,10 +98,11 @@ there is.</p>
 <h2 class="section-head">what is deliberately missing</h2>
 
 <p class="prose">There is <strong>no person index</strong>. Names appear on a company's own transaction
-list, exactly as FI publishes them, and nowhere else — there is no person page, no name
-search, and no way to sort or filter by person anywhere on this site. The register is
+list, exactly as FI publishes them, and nowhere else. That list can be searched, names
+included — FI's own search finds filings by person name too — but there is no person page,
+no search across companies, and no name column on the leaderboard. The register is
 public so that a company's insider trading can be scrutinised; assembling it into a
-searchable profile of an individual is a different thing, and this site does not do it.</p>
+profile of an individual is a different thing, and this site does not do it.</p>
 
 <p class="prose">Market cap is missing for most issuers. It is used only to sanity-check values, so a
 company without one is marked <em>unverifiable</em> and still counted — never silently
@@ -129,8 +130,6 @@ dropped, and never shown as a market cap of zero.</p>
 data is Finansinspektionen's; every reported row above links back to the same search
 there.</p>
 </section>
-
-<p data-static-prompt><span class="prompt" aria-hidden="true">erik@insyn:~$</span> <span class="cursor" aria-hidden="true">█</span></p>
 
 </main>
 

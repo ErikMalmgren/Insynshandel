@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import zoneinfo
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # ── Layout ───────────────────────────────────────────────────────────────────
@@ -111,6 +111,18 @@ AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK = 1_000_000_000.0
 
 # ── Aggregate windows — anchored to config.today(), not MAX(tx_date) ─────────
 AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")
+
+
+def period_bounds(period: str, today: date) -> tuple[str, str]:
+    """Inclusive (start, end) transaction dates of an aggregate window."""
+    end = today.isoformat()
+    if period == "all":
+        return FI_EARLIEST, end
+    if period == "ytd":
+        return date(today.year, 1, 1).isoformat(), end
+    days = {"30d": 30, "90d": 90, "365d": 365}[period]
+    return (today - timedelta(days=days)).isoformat(), end
+
 
 # ── Static export ───────────────────────────────────────────────────────────
 EXPORT_PERIODS = ("30d", "90d", "365d", "all")   # no ytd file

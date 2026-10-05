@@ -93,8 +93,10 @@ no_lei → not_current → nature_not_counted → volume_unit → unparseable_nu
 **No person index.** The names in the register belong to private individuals,
 and republishing them in a more searchable form than the regulator does is a
 different act under GDPR. Names appear only on a company's own transaction
-list. There is no person page, no name search, and no way to sort or filter by
-person. `companies.json` carries no names of people at all.
+list, and can be searched there — FI's own search client finds filings by
+person name, so that is no more searchable than the regulator already makes
+it. There is no person page, no search across companies, and no name column
+on the leaderboard. `companies.json` carries no names of people at all.
 
 ## Running it locally
 
@@ -160,6 +162,7 @@ data-quality.json                excluded outliers, ISINs filed under >1 LEI
 leaderboard-{30d,90d,365d,all}.json
 companies.json                   lei, name, ticker
 company/{lei}.json               per-company totals + recent transactions
+company-tx/{lei}.json            per-company full transaction history (loaded on demand)
 ```
 
 ## CLI

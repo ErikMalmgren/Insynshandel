@@ -463,16 +463,22 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             lambda: (not s.warnings, "; ".join(s.warnings) or "clean"),
         )
         c.check(
-            # The real worry is a per-company file carrying full history. Assert
-            # that, not its byte-count proxy — the corpus outgrew "a few MB".
+            # company/{lei}.json is what every company page loads first; the full
+            # history lives in company-tx/ and is fetched only on demand. Assert
+            # the cap, not its byte-count proxy.
             "no company file exceeds COMPANY_TX_LIMIT transactions",
             lambda: _company_tx_capped(s.out_dir),
         )
-        # Size is a measured fact, not a gate: the cap above is the invariant, and
-        # a threshold here only re-fires as the register grows. Promote it back to
-        # a check if `dist/` ever gets committed to a branch (ingest.yml 6b).
+        c.check(
+            "every company-tx file holds the full history, with company/ as its prefix",
+            lambda: _company_tx_complete(s.out_dir),
+        )
+        # Size is a measured fact, not a gate: company-tx/ carries every filed row
+        # and grows with the register, so a threshold here would only re-fire.
+        # Promote it back to a check if `dist/` ever gets committed to a branch
+        # (ingest.yml 6b).
         print(f"  INFO  dist/ is {s.bytes / 1_000_000:.2f} MB over {len(files)} files "
-              f"— bounded by COMPANY_TX_LIMIT, not by a byte budget")
+              f"— company-tx/ is the full history and grows with the register")
         c.check(
             "companies.json carries no person data",
             lambda: (
@@ -496,6 +502,32 @@ def _company_tx_capped(dist) -> tuple[bool, str]:
     if over:
         return False, f"{over} files over the {config.COMPANY_TX_LIMIT}-transaction cap"
     return True, f"max {worst_n}/{config.COMPANY_TX_LIMIT} ({worst_lei})"
+
+
+def _company_tx_complete(dist) -> tuple[bool, str]:
+    """company-tx/{lei}.json must hold tx_count_total rows, and the capped list
+    in company/{lei}.json must be exactly its first rows — the page shows the
+    capped list first and swaps in the full one, grouping by array order."""
+    import json
+
+    bad: list[str] = []
+    n = 0
+    for f in sorted((dist / "company").glob("*.json")):
+        n += 1
+        detail = json.loads(f.read_text(encoding="utf-8"))
+        full_path = dist / "company-tx" / f.name
+        if not full_path.exists():
+            bad.append(f"{f.stem}: missing")
+            continue
+        full = json.loads(full_path.read_text(encoding="utf-8"))["transactions"]
+        recent = detail["recent_transactions"]
+        if len(full) != detail["tx_count_total"]:
+            bad.append(f"{f.stem}: {len(full)} rows, total {detail['tx_count_total']}")
+        elif full[:len(recent)] != recent:
+            bad.append(f"{f.stem}: recent is not a prefix")
+    if bad:
+        return False, f"{len(bad)} bad: {'; '.join(bad[:5])}"
+    return True, f"{n} companies complete"
 
 
 def _leaderboard_complete(conn: sqlite3.Connection, dist) -> tuple[bool, str]:

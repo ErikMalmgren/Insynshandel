@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 
 from .. import config, db
 from ..db import immediate
@@ -204,16 +203,6 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
 
 
 # ── aggregate pass ─────────────────────────────────────────────────────────
-def _period_bounds(period: str, today: date) -> tuple[str, str]:
-    end = today.isoformat()
-    if period == "all":
-        return config.FI_EARLIEST, end
-    if period == "ytd":
-        return date(today.year, 1, 1).isoformat(), end
-    days = {"30d": 30, "90d": 90, "365d": 365}[period]
-    return (today - timedelta(days=days)).isoformat(), end
-
-
 _AGG_SELECT = """
 WITH counted AS (
   SELECT COALESCE(a.canonical_lei, n.lei) AS lei,
@@ -243,7 +232,7 @@ def aggregate_periods(conn: sqlite3.Connection) -> dict[str, int]:
     with immediate(conn):
         conn.execute("DELETE FROM agg_company_period")
         for period in config.AGG_PERIODS:
-            start, end = _period_bounds(period, today)
+            start, end = config.period_bounds(period, today)
             n = 0
             for row in conn.execute(_AGG_SELECT, {"start": start, "end": end}).fetchall():
                 buy, sell = row["buy_value_sek"], row["sell_value_sek"]

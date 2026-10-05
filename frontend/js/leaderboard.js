@@ -8,7 +8,7 @@
  */
 
 import { url, getJSON, fmt, el, clear, setStatus, moneyCell, mcapCell, pctCell, tickerMatches }
-    from './insyn.js?v=2';
+    from './insyn.js?v=3';
 
 const PERIODS = [
     ['30d',  '30 days'],

@@ -196,16 +196,21 @@ _TX_FROM = (
     "SELECT :lei WHERE NOT EXISTS (SELECT 1 FROM issuer_alias WHERE alias_lei = :lei))"
 )
 _TX_COLS = (
-    "transaction_date, published_date, pdmr, position, nature, sign, is_counted, "
-    "instrument_type, instrument_name, isin, volume, price, currency, "
+    "transaction_date, published_date, issuer_name, pdmr, position, nature, sign, "
+    "is_counted, instrument_type, instrument_name, isin, volume, price, currency, "
     "gross_value_sek, verification, exclude_reason"
 )
+# a total order: a tie on the dates alone left the LIMIT cutoff to the query
+# plan, so the same DB could export different rows. Shared by the capped and
+# the full query — the client relies on the capped list being an exact prefix
+# of the full one, and groups adjacent rows by array order alone.
+_TX_ORDER = "ORDER BY transaction_date DESC, published_at DESC, raw_id DESC"
 
 
 def _tx(r: sqlite3.Row) -> schemas.CompanyTransaction:
     return schemas.CompanyTransaction(
         transaction_date=r["transaction_date"], published_date=r["published_date"],
-        pdmr=r["pdmr"], position=r["position"], nature=r["nature"], sign=r["sign"],
+        issuer_name=r["issuer_name"], pdmr=r["pdmr"], position=r["position"], nature=r["nature"], sign=r["sign"],
         is_counted=r["is_counted"], instrument_type=r["instrument_type"],
         instrument_name=r["instrument_name"], isin=r["isin"], volume=r["volume"],
         price=r["price"], currency=r["currency"], gross_value_sek=r["gross_value_sek"],
@@ -213,7 +218,28 @@ def _tx(r: sqlite3.Row) -> schemas.CompanyTransaction:
     )
 
 
-def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail | None:
+def period_windows(conn: sqlite3.Connection) -> list[schemas.PeriodWindow]:
+    """Every aggregate window's bounds, in AGG_PERIODS order. Read from
+    agg_company_period so they match the periods table exactly; a window with
+    nothing counted anywhere has no row there and is recomputed instead."""
+    stored = {
+        r["period"]: (r["period_start"], r["period_end"])
+        for r in conn.execute(
+            "SELECT DISTINCT period, period_start, period_end FROM agg_company_period"
+        )
+    }
+    today = config.today()
+    windows = []
+    for p in config.AGG_PERIODS:
+        start, end = stored.get(p) or config.period_bounds(p, today)
+        windows.append(schemas.PeriodWindow(period=p, start=start, end=end))
+    return windows
+
+
+def company_detail(
+    conn: sqlite3.Connection, lei: str,
+    windows: list[schemas.PeriodWindow] | None = None,
+) -> schemas.CompanyDetail | None:
     co = conn.execute(
         "SELECT c.lei, c.display_name, c.raw_ticker, c.figi_name, c.primary_isin, "
         "y.symbol AS yahoo_symbol FROM company c "
@@ -245,12 +271,11 @@ def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail 
             "SELECT * FROM agg_company_period WHERE lei = ? ORDER BY period", (lei,)
         )
     ]
-    total = conn.execute(f"SELECT COUNT(*) c {_TX_FROM}", {"lei": lei}).fetchone()["c"]
-    # a total order: a tie on the dates alone left the LIMIT cutoff to the query
-    # plan, so the same DB could export different rows
+    total = conn.execute(
+        f"SELECT COUNT(*) n, COALESCE(SUM(is_counted), 0) k {_TX_FROM}", {"lei": lei}
+    ).fetchone()
     recent = conn.execute(
-        f"SELECT {_TX_COLS} {_TX_FROM} "
-        "ORDER BY transaction_date DESC, published_at DESC, raw_id DESC LIMIT :limit",
+        f"SELECT {_TX_COLS} {_TX_FROM} {_TX_ORDER} LIMIT :limit",
         {"lei": lei, "limit": config.COMPANY_TX_LIMIT},
     ).fetchall()
 
@@ -262,8 +287,22 @@ def company_detail(conn: sqlite3.Connection, lei: str) -> schemas.CompanyDetail 
         market_cap_as_of=mc["as_of"] if mc else None,
         verification="ok" if (mc and mc["market_cap_sek"] is not None) else "unverifiable",
         name_variants=variants, periods=periods,
-        tx_count_total=total,
+        windows=windows if windows is not None else period_windows(conn),
+        tx_count_total=total["n"], tx_counted_total=total["k"],
         recent_transactions=[_tx(r) for r in recent],
+        computed_at=_iso_now(),
+    )
+
+
+# ── company-tx/{lei}.json ──────────────────────────────────────────────────
+def company_transactions(
+    conn: sqlite3.Connection, lei: str,
+) -> schemas.CompanyTransactions:
+    """A company's full history — company_detail's query without the LIMIT."""
+    rows = conn.execute(f"SELECT {_TX_COLS} {_TX_FROM} {_TX_ORDER}", {"lei": lei}).fetchall()
+    return schemas.CompanyTransactions(
+        lei=lei, count=len(rows),
+        transactions=[_tx(r) for r in rows],
         computed_at=_iso_now(),
     )
 

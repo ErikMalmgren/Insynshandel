@@ -154,29 +154,14 @@ a:hover {
     margin-bottom: var(--step);
 }
 
-/* ---------- prompt headings ----------
- *
- * The prompt is a real <span aria-hidden="true"> rather than a CSS ::before,
- * because screen readers announce generated content and "erik at insyn tilde
- * dollar" before every heading is unusable. The heading's accessible name is
- * just the command.
- */
+/* ---------- headings ---------- */
 
-.cmd {
-    margin: calc(var(--step) * 1.75) 0 var(--step);
-    font-size: 1rem;
-    font-weight: 400;
+.page-title {
+    margin: 0 0 var(--step);
+    font-size: 1.25rem;
+    font-weight: 700;
     line-height: 1.5;
     overflow-wrap: anywhere;
-}
-
-h1.cmd {
-    margin-top: 0;
-}
-
-.prompt {
-    color: var(--prompt);
-    user-select: none;
 }
 
 .section-head {
@@ -276,12 +261,6 @@ code {
     margin-bottom: 0;
 }
 
-/* Static block cursor. No animation on this site either, by design. */
-.cursor {
-    color: var(--prompt);
-    user-select: none;
-}
-
 .visually-hidden {
     position: absolute;
     width: 1px;
@@ -330,7 +309,8 @@ code {
 /* ═══════════════ app ═══════════════
  *
  * Everything below is new for insyn. Nothing above this line differs from
- * terminal.css except .wrap-wide and the .kv column width.
+ * terminal.css except .wrap-wide, the .kv column width, and .page-title —
+ * insyn dropped the prompt headings and the cursor line.
  */
 
 /* ---------- status lines ----------
@@ -553,6 +533,94 @@ th[aria-sort="descending"] button::after {
     color: var(--muted);
 }
 
+/* Back to wherever the reader came from — bracketed like the nav. */
+.back-line {
+    margin-bottom: 0.5rem;
+}
+
+.back {
+    text-decoration: none;
+}
+
+.back::before {
+    content: "[";
+    color: var(--muted);
+}
+
+.back::after {
+    content: "]";
+    color: var(--muted);
+}
+
+.back:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+/* A button that reads as a link: name variants, "clear", "show all". */
+.link-button,
+.tx-toggle {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--link);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.link-button:hover,
+.tx-toggle:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.link-button[aria-pressed="true"] {
+    color: var(--prompt);
+    font-weight: 700;
+}
+
+.tx-filter {
+    color: var(--muted);
+}
+
+.tx-filter strong {
+    color: var(--fg);
+}
+
+.filter input[type="date"] {
+    min-width: 0;
+}
+
+/* room for the placeholder beside the browser's own clear button */
+#tx-search {
+    min-width: 30ch;
+}
+
+/* Runs of one person's consecutive rows. The caret takes 2ch, so a lone row's
+ * date is pushed in by the same amount to line up with a run's, and a run's
+ * own rows sit one step further in. */
+.tx-caret {
+    display: inline-block;
+    width: 2ch;
+}
+
+td.tx-date {
+    padding-left: 2.75ch;
+}
+
+.tx-run td.tx-date {
+    padding-left: 0.75ch;
+}
+
+.tx-child td.tx-date {
+    padding-left: 4.75ch;
+}
+
+.tx-child td:first-child {
+    border-left: 2px solid var(--rule);
+}
+
 /* An excluded transaction is shown, greyed, with its reason — no row is ever
  * dropped from the list without saying why. */
 tr[data-counted="0"] td {
@@ -596,7 +664,8 @@ tr[data-counted="0"] td {
 
     .nav,
     .skip,
-    .cursor,
+    .back-line,
+    .show-all,
     .controls {
         display: none;
     }

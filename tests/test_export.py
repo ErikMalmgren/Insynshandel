@@ -137,6 +137,61 @@ def test_company_detail_follows_issuer_alias(built):
     assert folded.tx_count_total == 0
     assert folded.recent_transactions == []
 
+    # the full history follows the same merge
+    assert reads.company_transactions(built, canon).count == n[alias] + n[canon]
+    assert reads.company_transactions(built, alias).transactions == []
+
+
+def _busiest_lei(conn):
+    return conn.execute(
+        "SELECT n.lei FROM transaction_norm n JOIN company c ON c.lei = n.lei "
+        "GROUP BY n.lei ORDER BY COUNT(*) DESC, n.lei LIMIT 1"
+    ).fetchone()[0]
+
+
+def test_company_transactions_is_the_full_history_with_recent_as_prefix(built, monkeypatch):
+    monkeypatch.setattr(config, "COMPANY_TX_LIMIT", 2)
+    lei = _busiest_lei(built)
+    d = reads.company_detail(built, lei)
+    full = reads.company_transactions(built, lei)
+    assert full.count == len(full.transactions) == d.tx_count_total
+    assert d.tx_counted_total == sum(t.is_counted for t in full.transactions)
+    assert d.tx_count_total > len(d.recent_transactions) == 2
+    # the page shows the capped list, then swaps in the full one and groups by
+    # array order — so the capped list must be exactly its first rows
+    assert full.transactions[:2] == d.recent_transactions
+
+
+def test_every_transaction_carries_the_name_it_was_filed_under(built):
+    lei = _busiest_lei(built)
+    d = reads.company_detail(built, lei)
+    rows = reads.company_transactions(built, lei).transactions
+    assert all(t.issuer_name for t in rows)
+    # what the name-variant filter relies on: each variant's rows are exactly
+    # the rows carrying that issuer_name
+    per_name: dict[str, int] = {}
+    for t in rows:
+        per_name[t.issuer_name] = per_name.get(t.issuer_name, 0) + 1
+    assert per_name == {v.name: v.n_rows for v in d.name_variants}
+
+
+def test_company_detail_ships_every_period_window(built):
+    lei = _busiest_lei(built)
+    windows = reads.company_detail(built, lei).windows
+    assert [w.period for w in windows] == list(config.AGG_PERIODS)
+    assert all(w.start <= w.end for w in windows)
+    # where the aggregate wrote a window, the bounds are the periods table's own
+    stored = {
+        r["period"]: (r["period_start"], r["period_end"])
+        for r in built.execute(
+            "SELECT DISTINCT period, period_start, period_end FROM agg_company_period")
+    }
+    for w in windows:
+        if w.period in stored:
+            assert (w.start, w.end) == stored[w.period]
+        else:
+            assert (w.start, w.end) == config.period_bounds(w.period, config.today())
+
 
 def test_company_detail_unknown_lei_is_none(built):
     assert reads.company_detail(built, "NOSUCHLEI0000000000") is None
@@ -208,6 +263,8 @@ def test_export_writes_the_documented_file_set(built, tmp_path):
             "leaderboard-365d.json", "leaderboard-all.json"} <= names
     assert "leaderboard-ytd.json" not in names           # the export has no ytd file
     assert any(n.startswith("company/") for n in names)
+    assert {n.replace("company/", "company-tx/", 1)
+            for n in names if n.startswith("company/")} <= names
     assert not s.warnings
 
 

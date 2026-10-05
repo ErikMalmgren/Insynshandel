@@ -3,11 +3,12 @@
  * No person field — neither the reporting insider's name nor their position —
  * is read anywhere in this file. Those two render inside company.js and
  * nowhere else, because they belong on a company's own transaction list
- * only: no name search, no person page, no name column on the
- * leaderboard, no sorting or filtering by person anywhere. Anything generic
- * enough to live in a shared module is generic enough to end up on the
- * leaderboard by accident, which is how a person index gets built without
- * anyone ever deciding to build one.
+ * only: no person page, no name column on the leaderboard, no search across
+ * companies. (Searching within one company's list is fine — FI's own search
+ * client finds filings by person name, so that adds nothing the regulator
+ * does not.) Anything generic enough to live in a shared module is generic
+ * enough to end up on the leaderboard by accident, which is how a person
+ * index gets built without anyone ever deciding to build one.
  *
  * That makes a check you can run: the field name must not appear
  * outside company.js. It is satisfied structurally — the rendering lives
@@ -33,6 +34,7 @@ export const url = {
     leaderboard: (p)   => `${API_BASE}/leaderboard-${q(p)}.json`,
     companies:   ()    => `${API_BASE}/companies.json`,
     company:     (lei) => `${API_BASE}/company/${q(lei)}.json`,
+    companyTx:   (lei) => `${API_BASE}/company-tx/${q(lei)}.json`,
 };
 
 /* ---------- fetching ----------

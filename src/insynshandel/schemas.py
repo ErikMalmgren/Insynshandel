@@ -76,6 +76,7 @@ class NameVariant(BaseModel):
 class CompanyTransaction(BaseModel):
     transaction_date: str
     published_date: str
+    issuer_name: str     # the name FI filed the row under — one of name_variants
     pdmr: str            # a company's own transaction list, as FI shows it
     position: str
     nature: str
@@ -104,6 +105,15 @@ class CompanyPeriod(BaseModel):
     seller_count: int
 
 
+class PeriodWindow(BaseModel):
+    """An aggregate window's inclusive transaction-date bounds. Shipped for
+    every period, including the ones with nothing counted, so the client can
+    filter the transaction list by the same window the periods table uses."""
+    period: str
+    start: str
+    end: str
+
+
 class CompanyDetail(BaseModel):
     lei: str
     name: str
@@ -114,8 +124,20 @@ class CompanyDetail(BaseModel):
     verification: Verification
     name_variants: list[NameVariant]
     periods: list[CompanyPeriod]
+    windows: list[PeriodWindow]
     tx_count_total: int
+    tx_counted_total: int   # of tx_count_total, how many are counted
+    # the newest COMPANY_TX_LIMIT rows — an exact prefix of company-tx/{lei}.json
     recent_transactions: list[CompanyTransaction]
+    computed_at: str
+
+
+class CompanyTransactions(BaseModel):
+    """company-tx/{lei}.json — the full history, in the same order as
+    CompanyDetail.recent_transactions. Fetched only when the page needs it."""
+    lei: str
+    count: int
+    transactions: list[CompanyTransaction]
     computed_at: str
 
 
