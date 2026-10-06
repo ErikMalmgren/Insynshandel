@@ -7,6 +7,7 @@ loaded into a table during `insyn build` / `insyn db migrate`.
 | --- | --- |
 | `ticker_override.csv` | `ticker_override` |
 | `nature_map.csv` | `nature_map` |
+| `position_group.csv` | `position_group` |
 | `market_cap_manual.csv` | ManualProvider input |
 | `issuer_alias.csv` | `issuer_alias` |
 
@@ -48,3 +49,22 @@ resolve automatically. **"OpenFIGI failed" is still not "this company has no
 symbol"**, so check each row before filling it in. Put in a real symbol, or leave
 `symbol` empty with a note when the company truly has none. `db.load_seeds()`
 skips every `?` row.
+
+## `nature_map.csv`
+
+Columns: `karaktar,sign,direction,counted,category,note`. An unmapped Karaktär
+fails the build.
+
+- `counted` / `sign` — the default board: only `counted = 1` rows reach
+  `agg_company_period`, and `sign` is `+1`/`-1` for those and `0` otherwise.
+- `direction` — how the nature moves the holding (`+1`, `-1`, or `0` for none,
+  e.g. a pledge), for every nature. The leaderboard's query builder uses it when
+  an uncounted nature is picked; a `0` row counts in tx but neither bought nor
+  sold. For a counted nature it must equal `sign`, which the loader asserts.
+
+## `position_group.csv`
+
+Columns: `pattern,group,note`. Ordered regex rules that fold FI's free-text
+Befattning into `config.POSITION_GROUPS`, for the leaderboard's position filter.
+How the text is split and matched is in the file's own header. `insyn doctor`
+reports how many rows no rule matched (they show as Övrigt).

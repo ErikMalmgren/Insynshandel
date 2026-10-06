@@ -27,6 +27,11 @@ from .fx import FxTable
 #   -> unparseable_number -> no_fx_series / no_fx_rate
 #   -> implausible_unit_price -> outlier -> (counted)
 #
+# `value_exclude_reason` is the same chain without the nature_not_counted step:
+# NULL means the row has a trustworthy SEK value whatever its nature, which is
+# what the leaderboard's query builder exports. For a counted nature the two
+# columns are always equal.
+#
 # `no_fx_series` and `no_fx_rate` are the same branch split by cause: the
 # Riksbank publishes no series for this currency at all (permanent, listed in
 # config.FX_NO_SERIES), versus we simply have not fetched the rate (fixable,
@@ -82,7 +87,7 @@ class AggregateSummary:
 
 
 _DERIVED_COLS = (
-    "sign", "is_counted", "verification", "exclude_reason",
+    "sign", "is_counted", "verification", "exclude_reason", "value_exclude_reason",
     "gross_value", "fx_rate_sek", "fx_rate_date", "gross_value_sek",
 )
 _UPDATE_SQL = (
@@ -154,24 +159,30 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
             verification = "ok"
 
         # ── ordered filter — first hit wins ───────
-        reason: str | None = None
+        # Evaluated in two halves around the nature step, so the chain with
+        # that step skipped (`value_reason`, what the query builder filters
+        # on) comes out of the same code as the real one.
+        before: str | None = None
         if not r["lei"]:
-            reason = "no_lei"
+            before = "no_lei"
         elif r["status"] != "Aktuell":
-            reason = "not_current"
-        elif counted == 0:
-            reason = "nature_not_counted"
-        elif r["volume_unit"] != "Antal":
-            reason = "volume_unit"
+            before = "not_current"
+
+        after: str | None = None
+        if r["volume_unit"] != "Antal":
+            after = "volume_unit"
         elif r["volume"] is None or r["price"] is None:
-            reason = "unparseable_number"
+            after = "unparseable_number"
         elif gross_sek is None:
-            reason = ("no_fx_series" if r["currency"] in config.FX_NO_SERIES
-                      else "no_fx_rate")
+            after = ("no_fx_series" if r["currency"] in config.FX_NO_SERIES
+                     else "no_fx_rate")
         elif _implausible_price(r, fx_rate, gross_sek):
-            reason = "implausible_unit_price"
+            after = "implausible_unit_price"
         elif verification == "outlier":
-            reason = "outlier"
+            after = "outlier"
+
+        reason = before or ("nature_not_counted" if counted == 0 else after)
+        value_reason = before or after
         is_counted = 1 if reason is None else 0
 
         if reason == "no_fx_rate":
@@ -191,6 +202,7 @@ def classify(conn: sqlite3.Connection) -> ClassifySummary:
             "is_counted": is_counted,
             "verification": verification,
             "exclude_reason": reason,
+            "value_exclude_reason": value_reason,
             "gross_value": gross_value,
             "fx_rate_sek": fx_rate,
             "fx_rate_date": fx_date,

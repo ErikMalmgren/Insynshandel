@@ -56,38 +56,103 @@ def test_meta_shape(built):
     assert m.unmapped_natures == {}  # sample_export_bytes has no unmapped nature
 
 
-def test_leaderboard_is_complete_and_unsorted(built):
-    lb = reads.leaderboard(built, "all")
-    n_companies = built.execute(
-        "SELECT COUNT(DISTINCT COALESCE("
-        "(SELECT canonical_lei FROM issuer_alias WHERE alias_lei = lei), lei)) "
-        "FROM transaction_norm WHERE is_counted = 1"
+def _valued_rows(conn) -> int:
+    lo, hi = config.period_bounds("all", config.today())
+    return conn.execute(
+        "SELECT COUNT(*) FROM transaction_norm WHERE value_exclude_reason IS NULL "
+        "AND transaction_date BETWEEN ? AND ?", (lo, hi)
     ).fetchone()[0]
-    assert lb.count == n_companies              # every active company, no limit
-    # Leaderboard sorting lives on the client, so the shared function must
-    # expose no server-side sort/paginate knob — assert that against the signature.
-    import inspect
-
-    assert list(inspect.signature(reads.leaderboard).parameters) == ["conn", "period"]
 
 
-def test_leaderboard_entry_has_every_sortable_field(built):
-    lb = reads.leaderboard(built, "all")
-    e = lb.entries[0]
-    for f in ("net_value_sek", "buy_value_sek", "sell_value_sek", "tx_count",
-              "buyer_count", "seller_count", "market_cap", "pct_of_mcap", "verification"):
-        assert hasattr(e, f)
+def test_facts_hold_every_valued_row_of_every_nature(built):
+    f = reads.facts(built)
+    assert f.meta.row_count == _valued_rows(built) == sum(y.count for y in f.years)
+    for y in f.years:
+        assert {len(getattr(y, k)) for k in "dcpnirv"} == {y.count}
+        assert all(str(y.year) == _day(f.meta, d)[:4] for d in y.d)
+    natures = {f.meta.natures[n].name for y in f.years for n in y.n}
+    assert {"Förvärv", "Avyttring"} < natures      # uncounted natures ship too
+    assert [n.name for n in f.meta.natures if n.default] == ["Förvärv", "Avyttring"]
+    # the client sorts and filters; the export ships no ordering of its own to
+    # rely on beyond date order
+    assert all(y.d == sorted(y.d) for y in f.years)
+
+
+def _day(meta, d: int) -> str:
+    from datetime import timedelta
+    return (date.fromisoformat(meta.epoch) + timedelta(days=d)).isoformat()
+
+
+def test_facts_share_one_build_that_tracks_the_index_space(built):
+    f = reads.facts(built)
+    assert {y.build for y in f.years} == {f.meta.build}
+    assert reads.facts(built).meta.build == f.meta.build     # deterministic
+    # one new issuer shifts every company index after it: a new build
+    built.execute(
+        "UPDATE transaction_norm SET lei = '00000000000000000000' WHERE raw_id = "
+        "(SELECT raw_id FROM transaction_norm WHERE value_exclude_reason IS NULL LIMIT 1)")
+    assert reads.facts(built).meta.build != f.meta.build
+
+
+def test_facts_number_people_within_each_company_only(built):
+    f = reads.facts(built)
+    first: dict[int, list[int]] = {}
+    for y in f.years:
+        for c, p in zip(y.c, y.p):
+            first.setdefault(c, [])
+            if p not in first[c]:
+                first[c].append(p)
+    # numbered 0, 1, 2… per company in order of first appearance
+    assert all(ps == list(range(len(ps))) for ps in first.values())
+    assert sum(1 for ps in first.values() if ps) > 1
+
+
+def test_facts_reproduce_agg_company_period(built, tmp_path):
+    from insynshandel import doctor
+
+    s = export_static.export(built, tmp_path / "dist")
+    good, detail = doctor.facts_parity(built, s.out_dir)
+    assert good, detail
+
+
+def test_facts_follow_issuer_alias(built, tmp_path):
+    from insynshandel import doctor
+
+    alias, canon = [r[0] for r in built.execute(
+        "SELECT lei FROM agg_company_period WHERE period = 'all' ORDER BY tx_count DESC, lei LIMIT 2"
+    )]
+    built.execute("INSERT INTO issuer_alias VALUES (?, ?, 'test')", (alias, canon))
+    aggregate.aggregate_periods(built)
+    leis = [c.lei for c in reads.facts(built).meta.companies]
+    assert canon in leis and alias not in leis
+    s = export_static.export(built, tmp_path / "dist")
+    good, detail = doctor.facts_parity(built, s.out_dir)
+    assert good, detail
+
+
+def test_parity_check_catches_a_missing_row(built, tmp_path):
+    from insynshandel import doctor
+
+    s = export_static.export(built, tmp_path / "dist")
+    defaults = [n["default"] for n in
+                json.loads((s.out_dir / "facts-meta.json").read_text())["natures"]]
+    year = max(s.out_dir.glob("facts/*.json"))
+    doc = json.loads(year.read_text())
+    # an uncounted nature's row would change nothing the check looks at
+    drop = next(k for k, n in enumerate(doc["n"]) if defaults[n])
+    for k in "dcpnirv":
+        del doc[k][drop]
+    year.write_text(json.dumps(doc))
+    good, _ = doctor.facts_parity(built, s.out_dir)
+    assert not good
 
 
 def test_missing_market_cap_serialises_as_null_never_zero(built):
-    lb = reads.leaderboard(built, "all")
-    for e in lb.entries:
-        assert e.market_cap is None
-        assert e.pct_of_mcap is None
-        assert e.verification == "unverifiable"
+    for c in reads.facts(built).meta.companies:
+        assert c.market_cap is None
 
 
-def test_present_market_cap_yields_a_real_pct(built):
+def test_present_market_cap_reaches_the_facts(built):
     lei = built.execute(
         "SELECT lei FROM agg_company_period WHERE period = 'all' "
         "ORDER BY ABS(net_value_sek) DESC LIMIT 1"
@@ -95,13 +160,29 @@ def test_present_market_cap_yields_a_real_pct(built):
     reference.marketcaps(built, providers=[OneCapProvider(lei, 5.0e9)])
     aggregate.run(built)
 
-    lb = reads.leaderboard(built, "all")
-    hit = next(e for e in lb.entries if e.lei == lei)
-    assert hit.market_cap == pytest.approx(5.0e9)
-    assert hit.pct_of_mcap == pytest.approx(hit.net_value_sek / 5.0e9)
-    assert hit.verification == "ok"
+    companies = reads.facts(built).meta.companies
+    assert next(c for c in companies if c.lei == lei).market_cap == pytest.approx(5.0e9)
     # everyone else still null
-    assert all(e.market_cap is None for e in lb.entries if e.lei != lei)
+    assert all(c.market_cap is None for c in companies if c.lei != lei)
+
+
+@pytest.mark.parametrize(
+    "name,short",
+    [
+        ("Smart Eye Aktiebolag (publ)", "Smart Eye"),
+        ("Svenska Handelsbanken AB (publ)", "Svenska Handelsbanken"),
+        ("Cassandra Oil AB ", "Cassandra Oil"),
+        ("AB Volvo", "Volvo"),
+        ("Aktiebolaget Electrolux", "Electrolux"),
+        ("Investment AB Öresund", "Investment AB Öresund"),   # never mid-name
+        ("Kitron ASA", "Kitron"),
+        ("Nimbus Group AB (publ)", "Nimbus Group"),
+        ("Färna Invest", "Färna Invest"),
+        ("AB", "AB"),                                          # never to nothing
+    ],
+)
+def test_short_name_drops_the_legal_form(name, short):
+    assert reads.short_name(name) == short
 
 
 def test_company_detail_caps_transactions_but_reports_total(built, monkeypatch):
@@ -207,7 +288,7 @@ def test_company_index_carries_no_person_data(built):
 
 def _exported_tickers(conn, lei):
     return {
-        next(e for e in reads.leaderboard(conn, "all").entries if e.lei == lei).ticker,
+        next(c for c in reads.facts(conn).meta.companies if c.lei == lei).ticker,
         next(c for c in reads.company_index(conn).companies if c.lei == lei).ticker,
         reads.company_detail(conn, lei).ticker,
     }
@@ -258,10 +339,10 @@ def test_export_connection_is_read_only(built, tmp_path):
 def test_export_writes_the_documented_file_set(built, tmp_path):
     s = export_static.export(built, tmp_path / "dist")
     names = {p.relative_to(s.out_dir).as_posix() for p in s.out_dir.rglob("*.json")}
-    assert {"meta.json", "companies.json", "data-quality.json",
-            "leaderboard-30d.json", "leaderboard-90d.json",
-            "leaderboard-365d.json", "leaderboard-all.json"} <= names
-    assert "leaderboard-ytd.json" not in names           # the export has no ytd file
+    assert {"meta.json", "companies.json", "data-quality.json", "facts-meta.json"} <= names
+    years = json.loads((s.out_dir / "facts-meta.json").read_text())["years"]
+    assert years and {f"facts/{y}.json" for y in years} == {
+        n for n in names if n.startswith("facts/")}
     assert any(n.startswith("company/") for n in names)
     assert {n.replace("company/", "company-tx/", 1)
             for n in names if n.startswith("company/")} <= names
@@ -294,16 +375,14 @@ def test_export_total_size_is_small(built, tmp_path):
 
 
 def test_export_flags_a_market_cap_zero_leak(built, tmp_path, monkeypatch):
-    # force the guard's failure mode: a leaderboard entry with market_cap == 0
-    real = reads.leaderboard
+    # force the guard's failure mode: a company in facts-meta with market_cap == 0
+    real = reads.facts
 
-    def poisoned(conn, period):
-        lb = real(conn, period)
-        if lb.entries:
-            lb.entries[0].market_cap = 0.0
-            lb.entries[0].pct_of_mcap = -1.0
-        return lb
+    def poisoned(conn, windows=None):
+        f = real(conn, windows)
+        f.meta.companies[0].market_cap = 0.0
+        return f
 
-    monkeypatch.setattr(reads, "leaderboard", poisoned)
+    monkeypatch.setattr(reads, "facts", poisoned)
     s = export_static.export(built, tmp_path / "dist")
     assert s.warnings

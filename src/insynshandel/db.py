@@ -95,15 +95,31 @@ def load_seeds(conn: sqlite3.Connection) -> dict[str, int]:
     counts: dict[str, int] = {}
 
     hdr, rows = _read_seed_csv(config.SEED_DIR / "nature_map.csv")
-    assert hdr == ["karaktar", "sign", "counted", "category", "note"], hdr
+    assert hdr == ["karaktar", "sign", "direction", "counted", "category", "note"], hdr
+    # a counted nature's direction IS its sign — the query builder's default
+    # selection has to reproduce agg_company_period exactly
+    bad = [r[0] for r in rows if int(r[3]) and int(r[2]) != int(r[1])]
+    assert not bad, f"counted natures whose direction differs from sign: {bad}"
     with immediate(conn):
         conn.execute("DELETE FROM nature_map")
         conn.executemany(
-            "INSERT INTO nature_map (karaktar, sign, counted, category, note) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [(r[0], int(r[1]), int(r[2]), r[3], r[4]) for r in rows],
+            "INSERT INTO nature_map (karaktar, sign, direction, counted, category, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(r[0], int(r[1]), int(r[2]), int(r[3]), r[4], r[5]) for r in rows],
         )
     counts["nature_map"] = len(rows)
+
+    hdr, rows = _read_seed_csv(config.SEED_DIR / "position_group.csv")
+    assert hdr == ["pattern", "group", "note"], hdr
+    unknown = sorted({r[1] for r in rows} - set(config.POSITION_GROUPS))
+    assert not unknown, f"position_group.csv: unknown groups {unknown}"
+    with immediate(conn):
+        conn.execute("DELETE FROM position_group")
+        conn.executemany(
+            "INSERT INTO position_group (ord, pattern, grp, note) VALUES (?, ?, ?, ?)",
+            [(i, r[0], r[1], r[2] if len(r) > 2 else "") for i, r in enumerate(rows)],
+        )
+    counts["position_group"] = len(rows)
 
     hdr, rows = _read_seed_csv(config.SEED_DIR / "issuer_alias.csv")
     assert hdr == ["alias_lei", "canonical_lei", "note"], hdr

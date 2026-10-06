@@ -418,10 +418,13 @@ table {
     white-space: nowrap;
 }
 
+/* Wraps, unlike the cells: the table's nowrap would otherwise let a long
+ * caption set the table's width on a phone. */
 caption {
     text-align: left;
     color: var(--muted);
     margin-bottom: 0.5rem;
+    white-space: normal;
 }
 
 th,
@@ -512,12 +515,169 @@ th[aria-sort="descending"] button::after {
     color: var(--muted);
 }
 
-/* Below this width the four secondary money/people columns come off; the rest
- * still scrolls inside .scroller. */
+/* The leaderboard's company cell: the name without its legal form, the
+ * ticker beside it in muted. */
+.col-name .ticker {
+    margin-left: 1ch;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+/* Below this width the secondary columns come off. The leaderboard keeps
+ * company · net · insiders · % mcap, and the company cell stops claiming 24ch:
+ * the name truncates (its full form is in the link's title) and the ticker
+ * drops to a second line. */
 @media (max-width: 46rem) {
     .opt {
         display: none;
     }
+
+    #board .col-name {
+        min-width: 0;
+    }
+
+    #board .col-name a {
+        display: block;
+        max-width: 13ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #board .col-name .ticker {
+        display: block;
+        margin-left: 0;
+        font-size: 0.875em;
+    }
+}
+
+/* A phone: four columns in about 40ch. */
+@media (max-width: 30rem) {
+    body {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    #board {
+        font-size: 0.875rem;
+    }
+
+    #board th,
+    #board td {
+        padding-left: 0.4ch;
+        padding-right: 0.4ch;
+    }
+}
+
+/* ---------- the leaderboard query ---------- */
+
+.range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
+}
+
+.query {
+    margin-bottom: var(--step);
+}
+
+.query summary {
+    width: fit-content;
+    color: var(--link);
+    cursor: pointer;
+}
+
+.query summary:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.query summary .muted {
+    margin-left: 1ch;
+}
+
+.query[open] summary {
+    margin-bottom: 0.75rem;
+}
+
+.query-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(26ch, 100%), 1fr));
+    gap: 1rem 3ch;
+    align-items: start;
+    margin-bottom: 0.5rem;
+}
+
+.q-wide {
+    grid-column: 1 / -1;
+}
+
+fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0.5rem 1ch 0.75rem;
+    border: 1px solid var(--rule);
+}
+
+legend {
+    padding: 0 0.5ch;
+    color: var(--prompt);
+    font-weight: 700;
+}
+
+.q-natures,
+.q-columns {
+    columns: 26ch;
+    column-gap: 3ch;
+}
+
+.q-group {
+    break-inside: avoid;
+    margin-bottom: 0.75rem;
+}
+
+.link-button.q-cat {
+    color: var(--muted);
+}
+
+.q-item {
+    display: flex;
+    gap: 1ch;
+    align-items: baseline;
+}
+
+.q-item input {
+    margin: 0;
+    accent-color: var(--prompt);
+}
+
+@media (pointer: coarse) {
+    .q-item {
+        min-height: 2rem;
+        align-items: center;
+    }
+}
+
+.q-shortcuts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 2ch;
+    margin: 0 0 0.5rem;
+}
+
+.q-shortcuts button::before {
+    content: "[";
+    color: var(--muted);
+}
+
+.q-shortcuts button::after {
+    content: "]";
+    color: var(--muted);
+}
+
+.q-note {
+    margin: 0.5rem 0 0;
+    font-size: 0.875rem;
 }
 
 /* ---------- company page ---------- */
@@ -666,7 +826,8 @@ tr[data-counted="0"] td {
     .skip,
     .back-line,
     .show-all,
-    .controls {
+    .controls,
+    .query {
         display: none;
     }
 

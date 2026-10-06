@@ -33,8 +33,8 @@ FI marknadssok ──► ingest ──► raw_transaction   (append-only, source
 | `ingest` | Fetches the FI export by publication-date window into `raw_transaction`. Rows FI stops returning are marked superseded, never deleted. |
 | `normalize` | Rebuilds `transaction_norm` from the live raw rows: parses dates, numbers and booleans. |
 | `refdata` | FX rates from the Riksbank, ISIN → ticker from OpenFIGI (Nasdaq Stockholm, First North, Spotlight or NGM listing), ISIN → Yahoo symbol from Yahoo's search, market caps from Yahoo (with a manual CSV fallback). |
-| `aggregate` | Classifies every row (counted, or excluded with a reason), then sums buys and sells per company for the `30d`, `90d`, `365d`, `ytd` and `all` windows. |
-| `export-static` | Writes the JSON the frontend reads. |
+| `aggregate` | Classifies every row (counted, or excluded with a reason), then sums buys and sells per company for the `7d`, `30d`, `90d`, `365d`, `ytd` and `all` windows. |
+| `export-static` | Writes the JSON the frontend reads. The leaderboard gets every row with a sound SEK value, of every nature, and aggregates it in the browser. |
 
 `insyn build` runs normalize → refdata → aggregate in that order.
 
@@ -98,6 +98,12 @@ person name, so that is no more searchable than the regulator already makes
 it. There is no person page, no search across companies, and no name column
 on the leaderboard. `companies.json` carries no names of people at all.
 
+The leaderboard's fact files carry two person-derived fields, neither a name:
+a number per person that only means something within one company (it counts
+distinct buyers and sellers, and cannot follow anyone across companies), and a
+coarse role group (VD, CFO, Styrelse…) mapped from FI's free-text position by
+`data/seed/position_group.csv`.
+
 ## Running it locally
 
 Requires Python 3.14 and [`uv`](https://docs.astral.sh/uv/).
@@ -159,7 +165,10 @@ The export contains:
 ```
 meta.json                        coverage span, missing days, row counts, last ingest
 data-quality.json                excluded outliers, ISINs filed under >1 LEI
-leaderboard-{30d,90d,365d,all}.json
+facts-meta.json                  the leaderboard's companies, natures, instruments,
+                                 role groups and preset windows
+facts/{year}.json                every row with a sound SEK value, any nature,
+                                 columnar — the leaderboard aggregates these
 companies.json                   lei, name, ticker
 company/{lei}.json               per-company totals + recent transactions
 company-tx/{lei}.json            per-company full transaction history (loaded on demand)

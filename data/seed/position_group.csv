@@ -1,0 +1,27 @@
+# Befattning (free text, ~3,900 spellings) → the role groups the leaderboard's
+# position filter offers. Loaded into `position_group`; read by
+# insynshandel.positions.
+#
+# The text is casefolded, parentheses dropped and whitespace collapsed, then
+# split into parts on , / ; + " och " " and " " & " " resp " — so
+# "VD, Styrelseledamot" is two parts, and a row carries every group any of its
+# parts matched. A comma right after a hyphen does not split, which keeps
+# FI's "administrations-, lednings- eller kontrollorgan" in one piece.
+#
+# Per part, the FIRST matching row wins (Python re.search), so specific rows sit
+# above general ones: "vice vd" above "vd", and a qualified VD ("vd
+# dotterbolag", "ceo of <subsidiary>") falls past the anchored VD row into
+# Övrig ledning. A part no row matches adds nothing; a row none of whose parts
+# matched is Övrigt, and `insyn doctor` reports how many rows that is.
+#
+# `group` must be one of config.POSITION_GROUPS.
+pattern,group,note
+"^vice (vd|verkställande direktör|koncernchef)\b|^vvd$|^deputy (ceo|managing director)$|^ställföreträdande (vd|verkställande direktör)$|^stf vd$",Vice VD,Deputy CEO — FI's own category is "Vice VD"
+"^vice (styrelse)?ordf|^vice chair",Styrelse,A vice chair is a board member, not the chair
+"^(vd|ceo|verkställande direktör( vd)?|chief executive officer|managing director|president|koncernchef|group ceo|ceo of issuer|(tf|t\.f\.|tillförordnad|tillträdande|acting|interim) (vd|ceo|verkställande direktör))$",VD,The issuer's own CEO; a qualified one (of a subsidiary) falls through to Övrig ledning
+"^deputy cfo|^vice (cfo|finanschef|ekonomichef)|^biträdande",Övrig ledning,A deputy is not the CFO
+"\bcfo\b|finanschef|finansdirektör|ekonomichef|ekonomidirektör|chief financial officer|^finance director$|^director of finance$|^head of (group )?finance$",CFO,FI's own category is "Ekonomichef/finanschef/finansdirektör"
+"ordf|orförande|\bchair",Ordförande,"Styrelseordförande, misspellings included"
+"styrelse|ledamot|ledarmot|suppleant|board|^director$|director of the board|non.?executive director|^lead director$|adjungerad|arbetstagarrepresentant",Styrelse,A bare "Director" is the English board title
+"^annan medlem i bolagets administrations",Övrigt,"FI's catch-all category — it would otherwise match ""lednings"" below"
+"annan ledande befattning|\banb\b|ledning|management|executive|chef|direktör|director|\bhead\b|chief|\bc(oo|to|io|mo|so|co|po|lo|bo|ro|do|bdo|hro|xo)\b|\bvp\b|vice president|\bsvp\b|\bevp\b|president|general counsel|jurist|controller|ansvarig|manager|\bvd\b|\bceo\b|\bmd\b|dotterbolag|officer|senior executive|leading position|leading official|ec member|secretary|sekreterare|^(ir|hr)$|investor relations?",Övrig ledning,"Other senior management, and every qualified VD/CEO"

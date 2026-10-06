@@ -29,31 +29,6 @@ class Meta(BaseModel):
     computed_at: str
 
 
-class LeaderboardEntry(BaseModel):
-    lei: str
-    name: str
-    ticker: str | None
-    net_value_sek: float
-    buy_value_sek: float
-    sell_value_sek: float
-    tx_count: int
-    buyer_count: int
-    seller_count: int
-    n_unverifiable: int
-    market_cap: float | None
-    pct_of_mcap: float | None
-    verification: Verification
-
-
-class Leaderboard(BaseModel):
-    period: str
-    period_start: str
-    period_end: str
-    count: int
-    entries: list[LeaderboardEntry]
-    computed_at: str
-
-
 class CompanyIndexEntry(BaseModel):
     lei: str
     name: str
@@ -160,4 +135,62 @@ class DataQuality(BaseModel):
     outlier_count: int
     outliers: list[DataQualityEntry]
     contested_isin_count: int
+    computed_at: str
+
+
+# ── the leaderboard's fact export ──────────────────────────────────────────
+class FactsCompany(BaseModel):
+    lei: str
+    name: str
+    short_name: str        # name without its legal form — the leaderboard cell
+    ticker: str | None
+    market_cap: float | None
+
+
+class FactsNature(BaseModel):
+    name: str              # Karaktär, verbatim
+    direction: int         # +1 bought / -1 sold / 0 neither (counts in tx only)
+    category: str
+    default: bool          # selected by default — exactly the natures counted
+                           # in agg_company_period
+
+
+class FactsInstrument(BaseModel):
+    name: str              # '' = FI left the instrument type blank
+    rows: int
+
+
+class FactsMeta(BaseModel):
+    """facts-meta.json — the dimensions every facts/{year}.json indexes into,
+    and the preset windows. The client aggregates; nothing here is a total."""
+    build: str             # the index space — see FactsYear.build
+    epoch: str             # day 0 of FactsYear.d
+    windows: list[PeriodWindow]
+    years: list[int]
+    companies: list[FactsCompany]
+    natures: list[FactsNature]
+    instruments: list[FactsInstrument]
+    position_groups: list[str]
+    row_count: int
+    computed_at: str
+
+
+class FactsYear(BaseModel):
+    """facts/{year}.json — every row with a trustworthy SEK value
+    (value_exclude_reason IS NULL), whatever its nature, as parallel arrays in
+    transaction-date order: row k is (d[k], c[k], p[k], n[k], i[k], r[k], v[k])."""
+    # A hash of the lists c / n / i / r index into. A year file and a
+    # facts-meta.json from different deploys can disagree on every index — one
+    # new issuer shifts every company after it — so the client refuses to
+    # combine two files whose builds differ, and keys its fetch on it.
+    build: str
+    year: int
+    count: int
+    d: list[int]           # transaction date, days since FactsMeta.epoch
+    c: list[int]           # FactsMeta.companies index — the canonical LEI
+    p: list[int]           # person, numbered within the company only; -1 = none
+    n: list[int]           # FactsMeta.natures index
+    i: list[int]           # FactsMeta.instruments index
+    r: list[int]           # role-group bitmask, bit k = position_groups[k]
+    v: list[int]           # gross value, whole SEK (always >= 0)
     computed_at: str

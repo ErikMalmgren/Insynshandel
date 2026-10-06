@@ -1,42 +1,42 @@
-karaktar,sign,counted,category,note
-Förvärv,1,1,market,Open-market or negotiated acquisition
-Avyttring,-1,1,market,Disposal
-Teckning,0,0,subscription,Rights-issue subscription — excluded; mostly BTA/BTU interim paper
-Tilldelning,0,0,compensation,54% aktieprogram and 45% priced at 0 — mostly free awards
-Interntransaktion – Förvärv,0,0,internal,Transfer between own/related accounts
-Interntransaktion – Avyttring,0,0,internal,Transfer between own/related accounts
-Koncernintern överföring förvärv,0,0,internal,Intra-group transfer (older wording)
-Koncernintern överföring avyttring,0,0,internal,Intra-group transfer (older wording)
-Lösen ökning,0,0,paired_leg,Option exercise — paired with Lösen minskning
-Lösen minskning,0,0,paired_leg,Option exercise — paired with Lösen ökning
-Utbyte ökning,0,0,paired_leg,Exchange — paired
-Utbyte minskning,0,0,paired_leg,Exchange — paired
-Konvertering ökning,0,0,paired_leg,Conversion — paired
-Konvertering minskning,0,0,paired_leg,Conversion — paired
-Fusion ökning,0,0,corporate,Merger mechanics — not a discretionary purchase
-Fusion minskning,0,0,corporate,Merger mechanics
-Utdelning mottagen,0,0,non_market,Dividend in kind received
-Utdelning lämnad,0,0,non_market,Dividend in kind given
-Gåva mottagen,0,0,non_market,Gift received
-Gåva lämnad,0,0,non_market,Gift given
-Arv mottagen,0,0,non_market,Inheritance
-Pantsättning,0,0,pledge,Pledge — no change of beneficial ownership
-Pantsättning åter,0,0,pledge,Pledge released
-Lån mottaget,0,0,lending,Securities borrowing
-Lån utlåning,0,0,lending,Securities lending
-Lån återgång ökning,0,0,lending,Loan return
-Lån återgång minskning,0,0,lending,Loan return
-Inlösen egenutfärdat instrument,0,0,corporate,Redemption of own issued instrument
-Utfärdande av instrument,0,0,derivative,Writing an instrument
-Koncernintern överföring ökning,0,0,internal,Intra-group transfer — increase
-Koncernintern överföring minskning,0,0,internal,Intra-group transfer — decrease
-Arv ökning,0,0,non_market,Inheritance received
-Arv minskning,0,0,non_market,Inheritance passed on
-Arv lämnad,0,0,non_market,Inheritance given
-Bodelning ökning,0,0,non_market,Division of marital property — increase
-Bodelning minskning,0,0,non_market,Division of marital property — decrease
-Bodelning förvärv,0,0,non_market,Division of marital property — acquisition leg
-Bodelning avyttring,0,0,non_market,Division of marital property — disposal leg
-Fission ökning,0,0,corporate,Demerger mechanics — not a discretionary purchase
-Fission minskning,0,0,corporate,Demerger mechanics
-Blankning,0,0,derivative,Short sale — no long position acquired or disposed
+karaktar,sign,direction,counted,category,note
+Förvärv,1,1,1,market,Open-market or negotiated acquisition
+Avyttring,-1,-1,1,market,Disposal
+Teckning,0,1,0,subscription,Rights-issue subscription — excluded; mostly BTA/BTU interim paper
+Tilldelning,0,1,0,compensation,54% aktieprogram and 45% priced at 0 — mostly free awards
+Interntransaktion – Förvärv,0,1,0,internal,Transfer between own/related accounts
+Interntransaktion – Avyttring,0,-1,0,internal,Transfer between own/related accounts
+Koncernintern överföring förvärv,0,1,0,internal,Intra-group transfer (older wording)
+Koncernintern överföring avyttring,0,-1,0,internal,Intra-group transfer (older wording)
+Lösen ökning,0,1,0,paired_leg,Option exercise — paired with Lösen minskning
+Lösen minskning,0,-1,0,paired_leg,Option exercise — paired with Lösen ökning
+Utbyte ökning,0,1,0,paired_leg,Exchange — paired
+Utbyte minskning,0,-1,0,paired_leg,Exchange — paired
+Konvertering ökning,0,1,0,paired_leg,Conversion — paired
+Konvertering minskning,0,-1,0,paired_leg,Conversion — paired
+Fusion ökning,0,1,0,corporate,Merger mechanics — not a discretionary purchase
+Fusion minskning,0,-1,0,corporate,Merger mechanics
+Utdelning mottagen,0,1,0,non_market,Dividend in kind received
+Utdelning lämnad,0,-1,0,non_market,Dividend in kind given
+Gåva mottagen,0,1,0,non_market,Gift received
+Gåva lämnad,0,-1,0,non_market,Gift given
+Arv mottagen,0,1,0,non_market,Inheritance
+Pantsättning,0,0,0,pledge,Pledge — no change of beneficial ownership
+Pantsättning åter,0,0,0,pledge,Pledge released
+Lån mottaget,0,0,0,lending,Securities borrowing
+Lån utlåning,0,0,0,lending,Securities lending
+Lån återgång ökning,0,1,0,lending,Loan return
+Lån återgång minskning,0,-1,0,lending,Loan return
+Inlösen egenutfärdat instrument,0,0,0,corporate,Redemption of own issued instrument
+Utfärdande av instrument,0,0,0,derivative,Writing an instrument
+Koncernintern överföring ökning,0,1,0,internal,Intra-group transfer — increase
+Koncernintern överföring minskning,0,-1,0,internal,Intra-group transfer — decrease
+Arv ökning,0,1,0,non_market,Inheritance received
+Arv minskning,0,-1,0,non_market,Inheritance passed on
+Arv lämnad,0,-1,0,non_market,Inheritance given
+Bodelning ökning,0,1,0,non_market,Division of marital property — increase
+Bodelning minskning,0,-1,0,non_market,Division of marital property — decrease
+Bodelning förvärv,0,1,0,non_market,Division of marital property — acquisition leg
+Bodelning avyttring,0,-1,0,non_market,Division of marital property — disposal leg
+Fission ökning,0,1,0,corporate,Demerger mechanics — not a discretionary purchase
+Fission minskning,0,-1,0,corporate,Demerger mechanics
+Blankning,0,0,0,derivative,Short sale — no long position acquired or disposed

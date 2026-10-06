@@ -327,6 +327,21 @@ def _aggregate_checks(c: _Checks, conn: sqlite3.Connection) -> None:
         ),
     )
     c.check(
+        # the query builder exports on value_exclude_reason, so a stale one
+        # (migrated, never re-aggregated: NULL everywhere) would ship every
+        # withdrawn and mis-priced row to the leaderboard
+        "value_exclude_reason is exclude_reason without the nature step",
+        lambda: (
+            (bad := conn.execute(
+                "SELECT COUNT(*) FROM transaction_norm WHERE "
+                "CASE WHEN exclude_reason = 'nature_not_counted' "
+                "THEN value_exclude_reason = 'nature_not_counted' "
+                "ELSE value_exclude_reason IS NOT exclude_reason END"
+            ).fetchone()[0]) == 0,
+            f"{bad} rows disagree" + (" — re-run `insyn aggregate`" if bad else ""),
+        ),
+    )
+    c.check(
         "every counted row has sign +1/-1 and a gross_value_sek",
         lambda: (
             (bad := conn.execute(
@@ -444,10 +459,10 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
                 f"{len(files)} files, {s.bytes / 1_000_000:.2f} MB",
             ),
         )
+        fm = json.loads((s.out_dir / "facts-meta.json").read_text())
         required = {
-            "meta.json", "companies.json", "data-quality.json",
-            "leaderboard-30d.json", "leaderboard-90d.json",
-            "leaderboard-365d.json", "leaderboard-all.json",
+            "meta.json", "companies.json", "data-quality.json", "facts-meta.json",
+            *(f"facts/{y}.json" for y in fm["years"]),
         }
         missing = required - set(files)
         c.check(
@@ -455,13 +470,18 @@ def _static_export_checks(c: _Checks, conn: sqlite3.Connection) -> None:
             lambda: (not missing, f"missing: {sorted(missing)}" if missing else "all present"),
         )
         c.check(
-            "leaderboard is complete — one entry per active company",
-            lambda: _leaderboard_complete(conn, s.out_dir),
+            "the leaderboard's facts reproduce agg_company_period in every window",
+            lambda: facts_parity(conn, s.out_dir),
         )
         c.check(
-            "no leaderboard entry has market_cap 0 — the 0 sentinel escaped",
+            "no company in facts-meta has market_cap 0 — the 0 sentinel escaped",
             lambda: (not s.warnings, "; ".join(s.warnings) or "clean"),
         )
+        # Measured, not pass/fail: a row whose Befattning no pattern in
+        # data/seed/position_group.csv matched is filtered as "Övrigt".
+        print(f"  INFO  {s.position_unmatched}/{s.fact_rows} fact rows "
+              f"({100 * s.position_unmatched / max(s.fact_rows, 1):.1f}%) have a Befattning "
+              f"no position_group pattern matched — shown as Övrigt")
         c.check(
             # company/{lei}.json is what every company page loads first; the full
             # history lives in company-tx/ and is fetched only on demand. Assert
@@ -530,19 +550,57 @@ def _company_tx_complete(dist) -> tuple[bool, str]:
     return True, f"{n} companies complete"
 
 
-def _leaderboard_complete(conn: sqlite3.Connection, dist) -> tuple[bool, str]:
+def facts_parity(conn: sqlite3.Connection, dist) -> tuple[bool, str]:
+    """Aggregate the exported facts the way leaderboard.js does with its
+    default selection — the counted natures, every instrument and role — over
+    every preset window, and compare with agg_company_period company by
+    company. Money may differ by the per-row rounding to whole SEK; nothing
+    else may differ at all."""
     import json
+    from datetime import date
 
-    lb = json.loads((dist / "leaderboard-30d.json").read_text())
-    active = conn.execute(
-        "SELECT COUNT(DISTINCT COALESCE("
-        "(SELECT canonical_lei FROM issuer_alias WHERE alias_lei = lei), lei)) "
-        "FROM transaction_norm WHERE is_counted = 1 "
-        "AND transaction_date BETWEEN ? AND ?",
-        (lb["period_start"], lb["period_end"]),
-    ).fetchone()[0]
-    got = len(lb["entries"])
-    return got == active, f"leaderboard-30d has {got}, DB has {active} active companies"
+    meta = json.loads((dist / "facts-meta.json").read_text(encoding="utf-8"))
+    epoch = date.fromisoformat(meta["epoch"])
+    direction = [n["direction"] if n["default"] else None for n in meta["natures"]]
+    leis = [co["lei"] for co in meta["companies"]]
+    shards = [json.loads((dist / "facts" / f"{y}.json").read_text(encoding="utf-8"))
+              for y in meta["years"]]
+
+    bad: list[str] = [f"facts/{y}.json is build {f['build']}, meta is {meta['build']}"
+                      for y, f in zip(meta["years"], shards) if f["build"] != meta["build"]]
+    for w in meta["windows"]:
+        lo = (date.fromisoformat(w["start"]) - epoch).days
+        hi = (date.fromisoformat(w["end"]) - epoch).days
+        got: dict[str, dict] = {}
+        for f in shards:
+            for d, c, p, n, v in zip(f["d"], f["c"], f["p"], f["n"], f["v"]):
+                sign = direction[n]
+                if sign is None or not lo <= d <= hi:
+                    continue
+                a = got.setdefault(leis[c], {"buy": 0, "sell": 0, "tx": 0,
+                                             "buyers": set(), "sellers": set()})
+                a["tx"] += 1
+                a["buy" if sign > 0 else "sell"] += v
+                if p >= 0:
+                    a["buyers" if sign > 0 else "sellers"].add(p)
+        want = {
+            r["lei"]: r for r in conn.execute(
+                "SELECT * FROM agg_company_period WHERE period = ?", (w["period"],))
+        }
+        if set(got) != set(want):
+            bad.append(f"{w['period']}: {len(set(got) ^ set(want))} companies differ")
+            continue
+        for lei, a in got.items():
+            r = want[lei]
+            slack = 0.5 * r["tx_count"] + 1e-6
+            if (a["tx"], len(a["buyers"]), len(a["sellers"])) != (
+                    r["tx_count"], r["buyer_count"], r["seller_count"]) \
+                    or abs(a["buy"] - r["buy_value_sek"]) > slack \
+                    or abs(a["sell"] - r["sell_value_sek"]) > slack:
+                bad.append(f"{w['period']}/{lei}")
+    if bad:
+        return False, f"{len(bad)} mismatches: {'; '.join(bad[:5])}"
+    return True, f"{len(meta['windows'])} windows, {meta['row_count']} fact rows"
 
 
 def run(*, network: bool = False) -> int:

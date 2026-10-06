@@ -8,8 +8,8 @@
 <meta name="description" content="Net insider buying and selling per company, from Finansinspektionen's insider register. Aggregated on LEI, converted to SEK at the transaction-date rate.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
 <link rel="canonical" href="https://insyn.malmgren.dev/">
-<link rel="stylesheet" href="/css/insyn.css?v=3">
-<script type="module" src="/js/leaderboard.js?v=3"></script>
+<link rel="stylesheet" href="/css/insyn.css?v=4">
+<script type="module" src="/js/leaderboard.js?v=4"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -19,12 +19,23 @@
 <h1 class="page-title">leaderboard</h1>
 
 <p class="lede prose">Net insider trading per company, from Finansinspektionen's
-<a href="https://marknadssok.fi.se/" rel="noopener">insynsregister</a>. Only acquisitions
-and disposals are counted; every value is converted to SEK at the transaction-date
-Riksbank rate. <a href="/about.html">What the numbers mean</a>.</p>
+<a href="https://marknadssok.fi.se/" rel="noopener">insynsregister</a>. By default only
+acquisitions and disposals are counted; open <strong>filters</strong> to add other
+transaction types or narrow by instrument and position. Every value is converted to SEK at
+the transaction-date Riksbank rate. <a href="/about.html">What the numbers mean</a>.</p>
 
 <div class="controls">
     <div class="tabs" id="tabs" role="group" aria-label="Period"></div>
+    <div class="range">
+        <div class="filter">
+            <label for="from">from</label>
+            <input type="date" id="from" name="from">
+        </div>
+        <div class="filter">
+            <label for="to">to</label>
+            <input type="date" id="to" name="to">
+        </div>
+    </div>
     <div class="filter">
         <label for="filter">filter</label>
         <input type="search" id="filter" name="filter" autocomplete="off"
@@ -32,10 +43,20 @@ Riksbank rate. <a href="/about.html">What the numbers mean</a>.</p>
     </div>
 </div>
 
-<p class="status" id="status" role="status" data-state="loading">Loading the 30d board…</p>
+<details class="query">
+    <summary>filters <span class="muted" id="query-summary"></span></summary>
+    <div class="query-body">
+        <fieldset id="q-nature" class="q-wide"><legend>nature</legend></fieldset>
+        <fieldset id="q-instrument" class="q-wide"><legend>instrument</legend></fieldset>
+        <fieldset id="q-role"><legend>position</legend></fieldset>
+    </div>
+    <p><button type="button" class="link-button" id="q-reset">reset filters</button></p>
+</details>
+
+<p class="status" id="status" role="status" data-state="loading">Loading the leaderboard…</p>
 
 <div class="scroller">
-<table>
+<table id="board">
     <caption id="board-caption"></caption>
     <thead><tr id="board-head"></tr></thead>
     <tbody id="board-body"></tbody>
@@ -43,9 +64,11 @@ Riksbank rate. <a href="/about.html">What the numbers mean</a>.</p>
 </div>
 
 <p class="prose muted">Sorted by net value, largest first — which ranks the largest
-companies first, because they are larger. <strong>% of mcap</strong> is the more
-informative column, and it is empty for most issuers: only about a fifth have a market
-cap on file. A negative net is a company whose insiders were net sellers.</p>
+companies first, because they are larger. <strong>% mcap</strong> is the more informative
+column, and it is empty for most issuers: only about a fifth have a market cap on file.
+<strong>insiders</strong> is how many different people bought / sold; several insiders
+buying at once says more than one large purchase. A negative net is a company whose
+insiders were net sellers.</p>
 
 </main>
 

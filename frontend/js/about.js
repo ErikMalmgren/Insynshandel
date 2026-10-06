@@ -8,7 +8,7 @@
  * No person field is read here — see the header of insyn.js.
  */
 
-import { url, getJSON, fmt, el, clear, setStatus, stamp } from './insyn.js?v=3';
+import { url, getJSON, fmt, el, clear, setStatus, stamp } from './insyn.js?v=4';
 
 const statusNode = document.getElementById('status');
 const coverageNode = document.getElementById('coverage');

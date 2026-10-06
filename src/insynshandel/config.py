@@ -110,7 +110,7 @@ MAX_EQUITY_UNIT_PRICE_SEK = 10_000.0
 AMOUNT_IN_BOTH_COLUMNS_FLOOR_SEK = 1_000_000_000.0
 
 # ── Aggregate windows — anchored to config.today(), not MAX(tx_date) ─────────
-AGG_PERIODS = ("30d", "90d", "365d", "ytd", "all")
+AGG_PERIODS = ("7d", "30d", "90d", "365d", "ytd", "all")
 
 
 def period_bounds(period: str, today: date) -> tuple[str, str]:
@@ -120,10 +120,17 @@ def period_bounds(period: str, today: date) -> tuple[str, str]:
         return FI_EARLIEST, end
     if period == "ytd":
         return date(today.year, 1, 1).isoformat(), end
-    days = {"30d": 30, "90d": 90, "365d": 365}[period]
+    days = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}[period]
     return (today - timedelta(days=days)).isoformat(), end
 
 
+# ── Role groups ─────────────────────────────────────────────────────────────
+# What data/seed/position_group.csv maps Befattning onto, in display order. A
+# row's groups ship as a bitmask, bit i = POSITION_GROUPS[i]; facts-meta.json
+# carries this list, so the client never hardcodes it. "Övrigt" is also where a
+# row no pattern matched lands.
+POSITION_GROUPS = ("VD", "Vice VD", "CFO", "Ordförande", "Styrelse",
+                   "Övrig ledning", "Övrigt")
+
 # ── Static export ───────────────────────────────────────────────────────────
-EXPORT_PERIODS = ("30d", "90d", "365d", "all")   # no ytd file
 COMPANY_TX_LIMIT = 50                             # recent transactions per company detail

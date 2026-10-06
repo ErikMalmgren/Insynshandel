@@ -8,8 +8,8 @@
 <meta name="description" content="What this dataset is, how far back it goes, which transactions are counted, how they are converted to SEK, and which rows are implausible enough to report.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230d1117'/%3E%3Ctext x='1.5' y='12.5' font-family='monospace' font-size='13' fill='%237ee787'%3E%3E%3C/text%3E%3C/svg%3E">
 <link rel="canonical" href="https://insyn.malmgren.dev/about.html">
-<link rel="stylesheet" href="/css/insyn.css?v=3">
-<script type="module" src="/js/about.js?v=3"></script>
+<link rel="stylesheet" href="/css/insyn.css?v=4">
+<script type="module" src="/js/about.js?v=4"></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -40,7 +40,7 @@ it — so the number is shown whether or not it is zero.</p>
 <section>
 <h2 class="section-head">what counts</h2>
 
-<p class="prose">Only two transaction types move the totals:</p>
+<p class="prose">By default, only two transaction types move the totals:</p>
 
 <dl class="kv prose">
     <dt>Förvärv</dt>
@@ -50,8 +50,12 @@ it — so the number is shown whether or not it is zero.</p>
     <dd>a disposal. Counts <strong>−1</strong>.</dd>
 </dl>
 
-<p class="prose">Everything else is excluded — pledges, lending, subscriptions, allotments, gifts,
-inheritances — and no row is ever dropped without a recorded reason. A company's
+<p class="prose">Everything else is excluded by default — pledges, lending, subscriptions,
+allotments, gifts, inheritances — and no row is ever dropped without a recorded reason.
+The leaderboard's <strong>filters</strong> can add any of them back: each counts as bought or
+sold by the way it moves the holding, and the few with no direction at all (a pledge, a
+securities loan) count as transactions but neither bought nor sold. The company pages
+always use the default. A company's
 transaction list shows the excluded rows too, greyed, with the reason in the last column.
 That is deliberate: a total you cannot reconcile against the rows behind it is a total you
 cannot check.</p>
@@ -100,7 +104,10 @@ there is.</p>
 <p class="prose">There is <strong>no person index</strong>. Names appear on a company's own transaction
 list, exactly as FI publishes them, and nowhere else. That list can be searched, names
 included — FI's own search finds filings by person name too — but there is no person page,
-no search across companies, and no name column on the leaderboard. The register is
+no search across companies, and no name column on the leaderboard. The leaderboard can be
+narrowed by role (VD, CFO, board…) and counts how many different people bought or sold,
+but it never sees a name: people are numbered within each company, so nobody can be
+followed from one company to the next. The register is
 public so that a company's insider trading can be scrutinised; assembling it into a
 profile of an individual is a different thing, and this site does not do it.</p>
 

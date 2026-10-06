@@ -1,18 +1,17 @@
 /* insyn.js — the shared layer: URLs, fetching, formatting, DOM.
  *
- * No person field — neither the reporting insider's name nor their position —
- * is read anywhere in this file. Those two render inside company.js and
- * nowhere else, because they belong on a company's own transaction list
- * only: no person page, no name column on the leaderboard, no search across
- * companies. (Searching within one company's list is fine — FI's own search
- * client finds filings by person name, so that adds nothing the regulator
- * does not.) Anything generic enough to live in a shared module is generic
- * enough to end up on the leaderboard by accident, which is how a person
- * index gets built without anyone ever deciding to build one.
+ * Person names render inside company.js and nowhere else: a company's own
+ * transaction list is where they belong, and there is no person page, no
+ * name column on the leaderboard and no search across companies. (Searching
+ * within one company's list is fine — FI's own search client finds filings
+ * by person name, so that adds nothing the regulator does not.)
  *
- * That makes a check you can run: the field name must not appear
- * outside company.js. It is satisfied structurally — the rendering lives
- * there — not by spelling the word differently here.
+ * The leaderboard does use two person-derived fields, neither of them a name:
+ * a number per person that is only meaningful within one company (so it can
+ * count distinct buyers and sellers, and cannot follow anyone from one
+ * company to the next), and a coarse role group (VD, CFO, Styrelse…) to
+ * filter on. Both come from the fact export; `pdmr` itself never leaves
+ * company.js.
  */
 
 /* ---------- where the data comes from ----------
@@ -31,7 +30,10 @@ const q = encodeURIComponent;
 export const url = {
     meta:        ()    => `${API_BASE}/meta.json`,
     dataQuality: ()    => `${API_BASE}/data-quality.json`,
-    leaderboard: (p)   => `${API_BASE}/leaderboard-${q(p)}.json`,
+    factsMeta:   ()    => `${API_BASE}/facts-meta.json`,
+    /* keyed on the build, so the HTTP cache can never hand a fresh
+     * facts-meta.json a year file from an older deploy — see leaderboard.js */
+    facts:       (y, build) => `${API_BASE}/facts/${q(y)}.json?b=${q(build)}`,
     companies:   ()    => `${API_BASE}/companies.json`,
     company:     (lei) => `${API_BASE}/company/${q(lei)}.json`,
     companyTx:   (lei) => `${API_BASE}/company-tx/${q(lei)}.json`,
@@ -39,21 +41,26 @@ export const url = {
 
 /* ---------- fetching ----------
  *
- * Cached per URL, forever. Switching period, sorting a column and typing in
- * the filter box are pure client work — every sortable field ships in every
- * entry, so there is nothing to go back to the network for. That is an
- * acceptance check: sorting and re-selecting a period must issue no request.
+ * Cached per URL, forever. Once the years a view needs have arrived, sorting a
+ * column, typing in the filter box and changing the query within those years
+ * are pure client work. That is an acceptance check: sorting and re-selecting
+ * a period must issue no request.
  *
- * No cache-busting on the JSON. Do not add a meta.json-as-manifest
- * scheme without first reading the cache-control header off the deployed site
- * — it costs two serial round trips before first paint and may buy nothing.
+ * No cache-busting for freshness. Do not add a meta.json-as-manifest scheme
+ * without first reading the cache-control header off the deployed site — it
+ * costs two serial round trips before first paint and may buy nothing. The
+ * one exception is about correctness, not freshness: the leaderboard's year
+ * files are numbers indexing into facts-meta.json, so the two must come from
+ * the same deploy. facts-meta.json is revalidated on every page load, and the
+ * year files are keyed on its build. That adds no round trip — the year files
+ * wait on facts-meta.json anyway.
  */
 
 const cache = new Map();
 
-export function getJSON(target) {
+export function getJSON(target, init) {
     if (!cache.has(target)) {
-        cache.set(target, fetch(target).then((r) => {
+        cache.set(target, fetch(target, init).then((r) => {
             if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${target}`);
             return r.json();
         }).catch((err) => {

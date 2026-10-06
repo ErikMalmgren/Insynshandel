@@ -2,16 +2,21 @@
 connection and returns a :mod:`schemas` model; ``export_static.py`` serializes
 it to one JSON file.
 
-`pct_of_mcap` and `market_cap` are read **through `market_cap_current`** so the
-0 sentinel is already SQL ``NULL`` before any arithmetic. Never divide a
-raw `market_cap` in Python here.
+`market_cap` is read **through `market_cap_current`** so the 0 sentinel is
+already SQL ``NULL`` before it reaches any JSON — the leaderboard divides by
+it in the browser. Never read a raw `market_cap` here.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import sqlite3
+from datetime import date
+from typing import NamedTuple
 
-from . import config, schemas
+from . import config, positions, schemas
 from .sources.openfigi import display_ticker
 
 FI_SEARCH = (
@@ -63,7 +68,7 @@ def meta(conn: sqlite3.Connection) -> schemas.Meta:
 
     longest = cur = 0
     prev = None
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     for iso in missing_days:
         d = date.fromisoformat(iso)
@@ -113,53 +118,139 @@ def meta(conn: sqlite3.Connection) -> schemas.Meta:
     )
 
 
-# ── leaderboard-{period}.json ──────────────────────────────────────────────
-_LEADERBOARD_SQL = """
-SELECT a.lei, a.period_start, a.period_end,
-       COALESCE(co.display_name, a.lei) AS name,
-       co.raw_ticker, co.figi_name, y.symbol AS yahoo_symbol,
-       a.buy_value_sek, a.sell_value_sek, a.net_value_sek,
-       a.tx_count, a.buyer_count, a.seller_count, a.n_unverifiable,
-       mc.market_cap_sek AS market_cap,
-       CASE WHEN mc.market_cap_sek > 0
-            THEN a.net_value_sek / mc.market_cap_sek END AS pct_of_mcap
-  FROM agg_company_period a
-  LEFT JOIN company co ON co.lei = a.lei
-  LEFT JOIN yahoo_symbol y ON y.isin = co.primary_isin
-  LEFT JOIN market_cap_current mc ON mc.lei = a.lei
- WHERE a.period = ?
+# ── facts-meta.json + facts/{year}.json ────────────────────────────────────
+# Every row with a trustworthy SEK value, whatever its nature, so the
+# leaderboard can aggregate any nature / date range / instrument / role group in
+# the browser. With the default natures (the counted ones) over a preset window
+# it must reproduce agg_company_period exactly — `insyn doctor` checks that.
+_FACTS_SQL = """
+SELECT COALESCE(a.canonical_lei, n.lei) AS lei, n.transaction_date, n.pdmr,
+       n.position, n.nature, n.instrument_type, n.gross_value_sek
+  FROM transaction_norm n
+  LEFT JOIN issuer_alias a ON a.alias_lei = n.lei
+ WHERE n.value_exclude_reason IS NULL
+   AND n.transaction_date BETWEEN :start AND :end
+ ORDER BY n.transaction_date, n.published_at, n.raw_id
 """
 
+# Legal forms, for the leaderboard's short name. Stripped repeatedly from the
+# end ("Smart Eye Aktiebolag (publ)" -> "Smart Eye") and once from the front
+# ("AB Volvo" -> "Volvo"); never from the middle ("Investment AB Öresund").
+_PUBL = re.compile(r"\s*,?\s*\(publ\.?\)\s*$", re.IGNORECASE)
+_FORM_TAIL = re.compile(
+    r"[\s,]+(publ|ab|aktiebolag|asa|as|a/s|oyj|abp|plc|ltd|limited|inc|corp|"
+    r"s\.a|sa|se|n\.v|nv|b\.v|bv|ag|gmbh)\.?$", re.IGNORECASE)
+_FORM_HEAD = re.compile(r"^(ab|aktiebolaget)\s+", re.IGNORECASE)
 
-def leaderboard(conn: sqlite3.Connection, period: str) -> schemas.Leaderboard:
-    if period not in config.AGG_PERIODS:
-        raise ValueError(f"unknown period {period!r}")
-    rows = conn.execute(_LEADERBOARD_SQL, (period,)).fetchall()
-    entries = [
-        schemas.LeaderboardEntry(
-            lei=r["lei"], name=r["name"],
-            ticker=_ticker(r["raw_ticker"], r["figi_name"], r["yahoo_symbol"]),
-            net_value_sek=r["net_value_sek"], buy_value_sek=r["buy_value_sek"],
-            sell_value_sek=r["sell_value_sek"], tx_count=r["tx_count"],
-            buyer_count=r["buyer_count"], seller_count=r["seller_count"],
-            n_unverifiable=r["n_unverifiable"],
-            market_cap=r["market_cap"], pct_of_mcap=r["pct_of_mcap"],
-            verification="ok" if r["market_cap"] is not None else "unverifiable",
+
+def short_name(name: str) -> str:
+    s = name.strip()
+    while True:
+        t = _FORM_TAIL.sub("", _PUBL.sub("", s)).strip()
+        if t == s or len(t) < 2:
+            break
+        s = t
+    t = _FORM_HEAD.sub("", s)
+    return t if len(t) >= 2 else s
+
+
+class Facts(NamedTuple):
+    meta: schemas.FactsMeta
+    years: list[schemas.FactsYear]
+    position_unmatched: int     # rows whose Befattning matched no pattern
+
+
+def facts(conn: sqlite3.Connection,
+          windows: list[schemas.PeriodWindow] | None = None) -> Facts:
+    windows = windows if windows is not None else period_windows(conn)
+    span = next(w for w in windows if w.period == "all")
+    epoch = date.fromisoformat(config.FI_EARLIEST)
+    roles = positions.Classifier.load(conn)
+
+    natures = conn.execute(
+        "SELECT karaktar, direction, category, counted FROM nature_map ORDER BY rowid"
+    ).fetchall()
+    nature_ix = {r["karaktar"]: k for k, r in enumerate(natures)}
+
+    rows = conn.execute(_FACTS_SQL, {"start": span.start, "end": span.end}).fetchall()
+
+    instrument_rows: dict[str, int] = {}
+    for r in rows:
+        instrument_rows[r["instrument_type"]] = instrument_rows.get(r["instrument_type"], 0) + 1
+    instruments = sorted(instrument_rows, key=lambda k: (-instrument_rows[k], k))
+    instrument_ix = {name: k for k, name in enumerate(instruments)}
+
+    leis = sorted({r["lei"] for r in rows})
+    company_ix = {lei: k for k, lei in enumerate(leis)}
+    # numbered per company in order of first appearance, so the same number at
+    # two companies says nothing about whether it is the same person
+    people: dict[str, dict[str, int]] = {lei: {} for lei in leis}
+    day: dict[str, int] = {}
+
+    cols: dict[int, dict[str, list[int]]] = {}
+    for r in rows:
+        tx = r["transaction_date"]
+        if tx not in day:
+            day[tx] = (date.fromisoformat(tx) - epoch).days
+        year = cols.setdefault(int(tx[:4]), {k: [] for k in "dcpnirv"})
+        seen = people[r["lei"]]
+        pdmr = r["pdmr"]
+        if pdmr is not None and pdmr not in seen:
+            seen[pdmr] = len(seen)
+        year["d"].append(day[tx])
+        year["c"].append(company_ix[r["lei"]])
+        year["p"].append(-1 if pdmr is None else seen[pdmr])
+        year["n"].append(nature_ix[r["nature"]])
+        year["i"].append(instrument_ix[r["instrument_type"]])
+        year["r"].append(roles.mask(r["position"]))
+        year["v"].append(round(r["gross_value_sek"]))
+
+    info = {
+        r["lei"]: r
+        for r in conn.execute(
+            "SELECT c.lei, c.display_name, c.raw_ticker, c.figi_name, "
+            "y.symbol AS yahoo_symbol, mc.market_cap_sek "
+            "FROM company c LEFT JOIN yahoo_symbol y ON y.isin = c.primary_isin "
+            "LEFT JOIN market_cap_current mc ON mc.lei = c.lei"
         )
-        for r in rows
+    }
+    companies = []
+    for lei in leis:
+        co = info.get(lei)
+        name = (co["display_name"] if co else None) or lei
+        companies.append(schemas.FactsCompany(
+            lei=lei, name=name, short_name=short_name(name),
+            ticker=_ticker(co["raw_ticker"], co["figi_name"], co["yahoo_symbol"]) if co else None,
+            market_cap=co["market_cap_sek"] if co else None,
+        ))
+
+    build = hashlib.sha256(json.dumps(
+        [epoch.isoformat(), leis, [r["karaktar"] for r in natures], instruments,
+         list(config.POSITION_GROUPS)], ensure_ascii=False,
+    ).encode()).hexdigest()[:16]
+    now = _iso_now()
+    years = [
+        schemas.FactsYear(build=build, year=y, count=len(c["d"]), computed_at=now, **c)
+        for y, c in sorted(cols.items())
     ]
-    span = conn.execute(
-        "SELECT period_start, period_end FROM agg_company_period WHERE period = ? LIMIT 1",
-        (period,),
-    ).fetchone()
-    return schemas.Leaderboard(
-        period=period,
-        period_start=span["period_start"] if span else "",
-        period_end=span["period_end"] if span else "",
-        count=len(entries),
-        entries=entries,   # UNSORTED — the client sorts
-        computed_at=_iso_now(),
+    meta = schemas.FactsMeta(
+        build=build,
+        epoch=epoch.isoformat(),
+        windows=windows,
+        years=[y.year for y in years],
+        companies=companies,
+        natures=[
+            schemas.FactsNature(name=r["karaktar"], direction=r["direction"],
+                                category=r["category"] or "", default=bool(r["counted"]))
+            for r in natures
+        ],
+        instruments=[schemas.FactsInstrument(name=k, rows=instrument_rows[k])
+                     for k in instruments],
+        position_groups=list(config.POSITION_GROUPS),
+        row_count=len(rows),
+        computed_at=now,
     )
+    return Facts(meta, years, roles.unmatched)
 
 
 # ── companies.json ─────────────────────────────────────────────────────────

@@ -175,13 +175,13 @@ def test_gbp_row_uses_transaction_date_rate_not_today(classified):
 
 
 def _classify_one(conn, *, valuta: str, volym: str = "100", pris: str = "10",
-                  instrumenttyp: str = "Aktie"):
-    """One clean Förvärv row, carried through to classify()."""
+                  instrumenttyp: str = "Aktie", karaktar: str = "Förvärv"):
+    """One clean row (a Förvärv unless told otherwise), carried through to classify()."""
     _seed_fx(conn)
     fields = {n: "" for n in fi.FIELD_NAMES}
     fields.update(
         publiceringsdatum="2024-05-01 10:00:00", transaktionsdatum="2024-05-01 00:00:00",
-        lei_kod="LEI999", emittent="Y AB", karaktar="Förvärv",
+        lei_kod="LEI999", emittent="Y AB", karaktar=karaktar,
         instrumenttyp=instrumenttyp, volym=volym, volymsenhet="Antal", pris=pris,
         valuta=valuta, status="Aktuell", person_i_ledande_stallning="P",
     )
@@ -191,7 +191,8 @@ def _classify_one(conn, *, valuta: str, volym: str = "100", pris: str = "10",
     normalize.normalize(conn)
     s = aggregate.classify(conn)
     return conn.execute(
-        "SELECT exclude_reason, is_counted FROM transaction_norm WHERE lei = 'LEI999'"
+        "SELECT exclude_reason, value_exclude_reason, is_counted FROM transaction_norm "
+        "WHERE lei = 'LEI999'"
     ).fetchone(), s
 
 
@@ -406,3 +407,42 @@ def test_high_priced_bond_is_not_flagged(db_conn):
                            instrumenttyp="Obligation")
     assert row["is_counted"] == 1
     assert row["exclude_reason"] is None
+
+
+# ── value_exclude_reason — the chain without its nature step ────────────────
+def test_value_reason_equals_exclude_reason_for_counted_natures(classified):
+    conn, _ = classified
+    assert conn.execute(
+        "SELECT COUNT(*) FROM transaction_norm WHERE nature IN "
+        "(SELECT karaktar FROM nature_map WHERE counted = 1) "
+        "AND value_exclude_reason IS NOT exclude_reason"
+    ).fetchone()[0] == 0
+
+
+def test_clean_uncounted_nature_has_a_value(db_conn):
+    """A Teckning is left off the default board, but its value is sound — the
+    query builder can count it."""
+    row, _ = _classify_one(db_conn, valuta="SEK", karaktar="Teckning")
+    assert row["is_counted"] == 0
+    assert row["exclude_reason"] == "nature_not_counted"
+    assert row["value_exclude_reason"] is None
+
+
+def test_uncounted_nature_still_gets_the_price_guard(db_conn):
+    """The real chain stops at nature_not_counted and never looks at the price;
+    the value chain must, or a total-in-Pris Teckning reaches the leaderboard."""
+    row, _ = _classify_one(db_conn, valuta="SEK", volym="27993250", pris="240741950",
+                           karaktar="Teckning")
+    assert row["exclude_reason"] == "nature_not_counted"
+    assert row["value_exclude_reason"] == "implausible_unit_price"
+
+
+def test_value_reason_keeps_the_steps_before_nature(db_conn, sample_export_bytes):
+    _seed_fx(db_conn)
+    _ingest(db_conn, sample_export_bytes)
+    aggregate.classify(db_conn)
+    for reason in ("no_lei", "not_current"):
+        assert db_conn.execute(
+            "SELECT COUNT(*) FROM transaction_norm WHERE exclude_reason = ? "
+            "AND value_exclude_reason IS NOT ?", (reason, reason)
+        ).fetchone()[0] == 0

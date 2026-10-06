@@ -3,26 +3,27 @@
  * Two modes: `?lei=` renders one company, no query renders a picker over
  * companies.json so the nav link has somewhere to land.
  *
- * THIS IS THE ONLY FILE ON THE SITE THAT RENDERS `pdmr` OR `position`.
- * Person fields belong on a company's own transaction list and nowhere
+ * THIS IS THE ONLY FILE ON THE SITE THAT RENDERS `pdmr` OR `position`
+ * verbatim. Names belong on a company's own transaction list and nowhere
  * else: no person page, no name column on the leaderboard, no search across
  * companies. Within one company's list they are searchable — FI's own
  * search client already finds a filing by the reporting person's name, so
- * that makes nothing more findable than the regulator does. The picker below
- * filters on company name and ticker only — the same two fields
- * companies.json carries, which is not an accident.
+ * that makes nothing more findable than the regulator does. (The leaderboard
+ * filters on a coarse role group and counts people by a per-company number —
+ * see insyn.js.) The picker below filters on company name and ticker only —
+ * the same two fields companies.json carries, which is not an accident.
  */
 
 import { url, getJSON, fmt, el, clear, setStatus, moneyCell, dashCell, stamp, param,
-    tickerMatches } from './insyn.js?v=3';
+    tickerMatches } from './insyn.js?v=4';
 
 /* agg_company_period is written per window only when counted transactions
  * exist there, and the export orders the array alphabetically — '365d', '90d',
  * 'all', 'ytd' — which reads as nonsense. Impose the chronological order and
  * say plainly that an absent window means nothing was counted in it. */
-const PERIOD_ORDER = ['30d', '90d', '365d', 'ytd', 'all'];
+const PERIOD_ORDER = ['7d', '30d', '90d', '365d', 'ytd', 'all'];
 const PERIOD_LABEL = {
-    '30d': '30 days', '90d': '90 days', '365d': '365 days',
+    '7d': '7 days', '30d': '30 days', '90d': '90 days', '365d': '365 days',
     ytd: 'year to date', all: 'all time',
 };
 
